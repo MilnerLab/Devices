@@ -10,12 +10,12 @@ Set-Location $repoRoot
 
 # 32-bit venv (for SPM-002 acquisition, loads 32-bit DLL)
 $venv32Path         = Join-Path $repoRoot ".venv32"
-$requirements32File = Join-Path $repoRoot "spm-002\_requirements_x32.txt"
+$requirements32File = Join-Path $repoRoot "_requirements_x32.txt"
 $python32Spec       = "-3.13-32"   # adjust if your 32-bit version is different
 
 # 64-bit venv (optional: for dev/tests of elliptec etc.)
 $venv64Path         = Join-Path $repoRoot ".venv64"
-$requirements64File = Join-Path $repoRoot "spm-002\_requirements_x64.txt"
+$requirements64File = Join-Path $repoRoot "_requirements_x64.txt"
 $python64Spec       = "-3.13"      # adjust if needed
 
 # Optional VS Code extensions file (one per repo)
