@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "devices"
+version = "0.1.0"
+description = "Local device drivers for SPM-002 spectrometer and Elliptec waveplate"
+authors = [
+  { name = "Milner Lab" }
+]
+requires-python = ">=3.10"
+dependencies = [] 
+
+[tool.setuptools]
+[tool.setuptools.packages.find]
+where = ["spm-002", "elliptec"]
