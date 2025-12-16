@@ -6,7 +6,7 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 
 # Path to the 32-bit Python used for acquisition
 PYTHON32_PATH = str(
-    REPO_ROOT / "acquisition" / ".venv32" / "Scripts" / "python.exe"
+    REPO_ROOT / ".venv32" / "Scripts" / "python.exe"
 )
 
 @dataclass
