@@ -3,15 +3,13 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "devices"
+name = "devices"  # beliebiger Paketname, hat nichts mit den Import-Namen zu tun
 version = "0.1.0"
-description = "Local device drivers for SPM-002 spectrometer and Elliptec waveplate"
-authors = [
-  { name = "Milner Lab" }
-]
+description = "Local drivers for the SPM-002 spectrometer and Elliptec waveplate"
 requires-python = ">=3.10"
-dependencies = [] 
+dependencies = []  # kannst du leer lassen, wir arbeiten mit _requirements_x32/_x64
 
-[tool.setuptools]
 [tool.setuptools.packages.find]
-where = ["spm-002", "elliptec"]
+# Such ab Repo-Root nach Paketen (Ordner mit __init__.py)
+where = ["."]
+include = ["spm_002*", "elliptec*"]
