@@ -2,11 +2,10 @@
 from typing import Optional, List
 import ctypes as ct
 
-from .dll import lib, c_int, c_ushort
-from .config import SpectrometerConfig
-from .models import SpectrumData
-from .exceptions import SpectrometerError
-
+from spm_002.config import SpectrometerConfig
+from spm_002.exceptions import SpectrometerError
+from spm_002.dll import lib, c_int, c_ushort
+from spm_002.models import SpectrumData
 
 class Spectrometer:
     """

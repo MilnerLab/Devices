@@ -3,7 +3,8 @@ import copy
 import threading
 from typing import Optional
 
-from .spm002.config import SpectrometerConfig
+from spm_002.config import SpectrometerConfig
+
 
 
 class ConfigManager:

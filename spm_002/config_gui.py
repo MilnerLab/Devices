@@ -3,8 +3,9 @@ import tkinter as tk
 from tkinter import ttk
 from typing import Optional
 
-from .spm002.config import SpectrometerConfig
-from .runtime_config import ConfigManager
+from spm_002.config import SpectrometerConfig
+from spm_002.runtime_config import ConfigManager
+
 
 
 class ConfigWindow:

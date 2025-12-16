@@ -4,9 +4,12 @@ import threading
 from datetime import datetime
 from typing import Dict
 
-from .spm002 import Spectrometer, SpectrometerConfig, SpectrumData
-from .runtime_config import ConfigManager
-from .config_gui import ConfigWindow
+from spm_002.config import SpectrometerConfig
+from spm_002.config_gui import ConfigWindow
+from spm_002.models import SpectrumData
+from spm_002.runtime_config import ConfigManager
+from spm_002.spectrometer import Spectrometer
+
 
 
 # ---------------------------------------------------------------------------

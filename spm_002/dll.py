@@ -2,7 +2,7 @@
 import ctypes as ct
 import os
 
-from .exceptions import SpectrometerError
+from spm_002.exceptions import SpectrometerError
 
 
 # Expose a few ctypes aliases so other modules can reuse them
