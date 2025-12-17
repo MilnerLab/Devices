@@ -1,6 +1,6 @@
 import time
 import clr
-from System import Decimal
+from decimal import Decimal
 from base_lib.models import Angle, AngleUnit, Range
 
 # === Konstanten ===
