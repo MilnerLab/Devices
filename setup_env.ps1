@@ -83,6 +83,7 @@ $python32Exe = (Resolve-Path $python32Exe).Path
 $env:PYTHON32_PATH = $python32Exe
 Write-Host "PYTHON32_PATH set to '$python32Exe'."
 
+'''
 # -------------------------------------------------------------------
 # 2) Setup 64-bit environment (optional dev/tests)
 # -------------------------------------------------------------------
@@ -97,6 +98,7 @@ Setup-Venv -VenvPath $venv64Path -PythonSpec $python64Spec -RequirementsFile $re
 $python64Exe = Join-Path $venv64Path "Scripts\python.exe"
 $python64Exe = (Resolve-Path $python64Exe).Path
 Write-Host "64-bit python at '$python64Exe'."
+'''
 
 # -------------------------------------------------------------------
 # 3) Install VS Code extensions (optional)
