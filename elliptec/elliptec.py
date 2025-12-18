@@ -227,12 +227,13 @@ class ElliptecDeviceBase:
         self._serial.flush()
         time.sleep(0.1)
 
-    def _send_and_read_one(self, cmd: str) -> Optional[str]:
+    def _send_and_read_one(self, cmd: str, *, clear_rx: bool = False) -> Optional[str]:
         """
         Send command and read a *single* reply line (if any) within serial timeout.
         This is good for 'gs', 'gv', 'gp', 'sv' etc.
         """
-        self._serial.reset_input_buffer()
+        if clear_rx:
+            self._serial.reset_input_buffer()
         self._send_raw(cmd)
         return self._readline()
 
@@ -263,8 +264,7 @@ class ElliptecDeviceBase:
         return self._address
 
     def get_status(self) -> StatusCode:
-        time.sleep(2)
-        r = self._send_and_read_one(f"{self._address}{HostCommand.GET_STATUS.value}")
+        r = self._send_and_read_one(f"{self._address}{HostCommand.GET_STATUS.value}", clear_rx=False)
         if r is None:
             raise ElliptecError("Timeout waiting for status reply")
         return _parse_status_reply(r, self._address)
