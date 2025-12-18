@@ -1,13 +1,9 @@
 import math
 import time
 
-from decimal import Decimal
 from typing import Optional
-
-from yaml import add_representer
-from base_lib.models import Angle, AngleUnit, Range
-from serial import Serial
-
+from base_lib.math.enums import AngleUnit
+from base_lib.math.models import Angle, Range
 from elliptec.elliptec import ElliptecDeviceBase
 
 # === Konstanten ===
@@ -67,6 +63,6 @@ class Rotator(ElliptecDeviceBase):
         self._move_relative(correction)
         
     def _angle_to_counts(self, angle: Angle) -> int:
-        return int(round(angle.Rad / (2.0 * math.pi) * self.COUNTS_PER_REV))
+        return int(round(angle.Rad / (2.0 * math.pi) * COUNTS_PER_REV))
         
     

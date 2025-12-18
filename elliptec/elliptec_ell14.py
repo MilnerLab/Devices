@@ -1,7 +1,6 @@
 import time
 import clr
 from decimal import Decimal
-from base_lib.models import Angle, AngleUnit, Range
 
 # === Konstanten ===
 ANGLE_RANGE = Range(Angle(-90, AngleUnit.DEG), Angle(90, AngleUnit.DEG))
