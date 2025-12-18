@@ -8,7 +8,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from collections import deque
 from enum import Enum, IntEnum
-from typing import Callable, Deque, Iterable, List, Optional, Tuple
+from typing import Callable, Deque, List, Optional, Tuple
 
 from serial import EIGHTBITS, PARITY_NONE, STOPBITS_ONE, Serial
 
@@ -16,13 +16,12 @@ from serial import EIGHTBITS, PARITY_NONE, STOPBITS_ONE, Serial
 # =============================================================================
 # Elliptec protocol helpers + a serial-tracing base class (threaded RX)
 #
-# Purpose:
-# - Make debugging reliable by NEVER "missing" replies while the device is moving.
-# - Log every TX and RX line (plus raw bytes), even if it arrives asynchronously.
+# v2 changes (important for your issue):
+# - Strict packet-length validation for fixed-length commands.
+#   -> prevents desync bugs like sending 9 hex digits for a 32-bit "long".
+# - Optional resync helpers (send '\r' + flush) for recovery.
 # =============================================================================
 
-
-# ----------------------------- Enums / Types --------------------------------
 
 class HostCommand(str, Enum):
     """Lowercase host commands (sent to device)."""
@@ -32,6 +31,7 @@ class HostCommand(str, Enum):
     MOVE_RELATIVE = "mr"
     SET_VELOCITY = "sv"
     GET_VELOCITY = "gv"
+    GET_INFO = "in"          # useful to verify device type + scaling
 
 
 class ReplyCommand(str, Enum):
@@ -39,6 +39,7 @@ class ReplyCommand(str, Enum):
     STATUS = "GS"
     POSITION = "PO"
     VELOCITY = "GV"
+    INFO = "IN"
 
 
 class StatusCode(IntEnum):
@@ -73,16 +74,12 @@ class SerialTraceEvent:
     raw: bytes = b""
 
 
-# ----------------------------- Exceptions -----------------------------------
-
 class ElliptecError(RuntimeError):
     def __init__(self, message: str, *, status: Optional[StatusCode] = None, reply: Optional[str] = None):
         super().__init__(message)
         self.status = status
         self.reply = reply
 
-
-# ----------------------------- Helper functions -----------------------------
 
 _HEX_DIGITS = "0123456789ABCDEF"
 
@@ -110,10 +107,12 @@ def _address_range(min_addr: str, max_addr: str) -> List[str]:
 
 def _encode_long32(value: int) -> str:
     """Encode signed 32-bit int as 8 hex digits (two's complement)."""
-    if not isinstance(value, int):
-        raise TypeError("value must be int")
-    v = value & 0xFFFFFFFF
+    v = int(value) & 0xFFFFFFFF
     return f"{v:08X}"
+
+
+def _hexdump(raw: bytes) -> str:
+    return " ".join(f"{b:02x}" for b in raw)
 
 
 def _parse_status_reply(reply: str, address: str) -> StatusCode:
@@ -142,36 +141,16 @@ def _parse_velocity_reply(reply: str, address: str) -> int:
 
 
 def _percent_to_hex_byte(percent: int) -> str:
-    if not isinstance(percent, int):
-        raise TypeError("percent must be int")
-    if percent < 0 or percent > 100:
+    p = int(percent)
+    if p < 0 or p > 100:
         raise ValueError("percent must be in [0, 100]")
-    return f"{percent:02X}"
+    return f"{p:02X}"
 
-
-def _hexdump(raw: bytes) -> str:
-    return " ".join(f"{b:02x}" for b in raw)
-
-
-# =============================================================================
-# Threaded serial transport with tracing
-# =============================================================================
 
 class ElliptecDeviceBase:
     """
-    Minimal Elliptec base class using *only serial* (no Thorlabs DLL),
-    with a background RX thread so you can reliably debug traffic.
-
-    Implements:
-      - home()
-      - move_relative()
-      - move_absolute()
-      - set_speed() / get_speed()
-      - get_status()
-
-    Debugging:
-      - Logs every TX + RX (and raw bytes) to console and optionally to a file.
-      - RX is continuously collected, so you won't miss async replies.
+    Serial-only Elliptec base class with a background RX thread (so you never miss replies)
+    and **strict packet validation** (so malformed fixed-length packets can't desync the parser).
     """
 
     def __init__(
@@ -182,9 +161,9 @@ class ElliptecDeviceBase:
         min_address: str = "0",
         max_address: str = "F",
         baudrate: int = 9600,
-        timeout_s: float = 0.10,          # serial read timeout (short is good for reader thread)
+        timeout_s: float = 0.10,
         write_timeout_s: float = 0.5,
-        settle_s: float = 0.0,            # optional post-write sleep
+        settle_s: float = 0.0,
         # --- tracing / debug ---
         debug: bool = False,
         debug_verbose: bool = False,
@@ -200,16 +179,19 @@ class ElliptecDeviceBase:
         self._logger = self._make_logger(port=port, log_path=debug_log_path) if self._debug else None
 
         # serial
-        self._serial = self._open(
-            port,
+        self._serial = Serial(
+            port=port,
             baudrate=baudrate,
-            timeout=timeout_s,
-            write_timeout=write_timeout_s,
+            bytesize=EIGHTBITS,
+            parity=PARITY_NONE,
+            stopbits=STOPBITS_ONE,
+            timeout=float(timeout_s),
+            write_timeout=float(write_timeout_s),
         )
 
         # RX thread + buffer
         self._rx_cond = threading.Condition()
-        self._rx_lines: Deque[Tuple[float, str, bytes]] = deque(maxlen=50_000)  # (ts, text, raw)
+        self._rx_lines: Deque[Tuple[float, str, bytes]] = deque(maxlen=50_000)
         self._stop_evt = threading.Event()
         self._rx_thread = threading.Thread(target=self._rx_loop, name="elliptec-rx", daemon=True)
         self._rx_thread.start()
@@ -234,23 +216,20 @@ class ElliptecDeviceBase:
         else:
             self._address = _normalize_address(address)
 
-    # ------------------------- context / lifecycle -------------------------
+    # ------------------------- lifecycle -------------------------
 
     def close(self) -> None:
         try:
-            if getattr(self, "_stop_evt", None) is not None:
-                self._stop_evt.set()
+            self._stop_evt.set()
         except Exception:
             pass
-
         try:
-            if getattr(self, "_rx_thread", None) is not None and self._rx_thread.is_alive():
+            if self._rx_thread.is_alive():
                 self._rx_thread.join(timeout=1.0)
         except Exception:
             pass
-
         try:
-            if getattr(self, "_serial", None) is not None and self._serial.is_open:
+            if self._serial.is_open:
                 self._serial.close()
         except Exception:
             pass
@@ -268,13 +247,10 @@ class ElliptecDeviceBase:
         logger = logging.getLogger(name)
         logger.setLevel(logging.INFO)
         logger.propagate = False
-
-        # avoid duplicate handlers if re-created
         if logger.handlers:
             return logger
 
         fmt = logging.Formatter("%(message)s")
-
         sh = logging.StreamHandler()
         sh.setFormatter(fmt)
         logger.addHandler(sh)
@@ -299,67 +275,25 @@ class ElliptecDeviceBase:
         if not self._debug:
             return
 
-        if direction == "RX" or direction == "TX":
+        if direction in ("RX", "TX"):
             line = f"{ev.ts_iso} {direction:>4} {text:<12}"
             if raw:
                 line += f"  [raw: {_hexdump(raw)}]"
         else:
             line = f"{ev.ts_iso} {direction:>4} {text}"
 
-        # optionally hide timeout spam
         if (not self._debug_verbose) and text == "<timeout>":
             return
 
         assert self._logger is not None
         self._logger.info(line)
 
-    # ------------------------------ serial ---------------------------------
+    # ------------------------------ RX loop --------------------------------
 
-    def _open(self, port: str, *, baudrate: int, timeout: float, write_timeout: float) -> Serial:
-        s = Serial(
-            port=port,
-            baudrate=baudrate,
-            bytesize=EIGHTBITS,
-            parity=PARITY_NONE,
-            stopbits=STOPBITS_ONE,
-            timeout=float(timeout),
-            write_timeout=float(write_timeout),
-        )
-        return s
-
-    def reset_parser(self) -> None:
-        """
-        Send a single carriage return to reset the device receive state machine.
-        Useful before scans on a noisy bus.
-        """
-        raw = b"\r"
-        if self._debug:
-            self._trace_event("TX", r"\r", raw=raw)
-        self._serial.write(raw)
-        self._serial.flush()
-
-    def flush_rx(self, *, clear_serial_buffer: bool = False) -> None:
-        """
-        Clear buffered RX lines.
-        Optionally also clears the OS/driver RX buffer via reset_input_buffer().
-        """
-        n = 0
-        with self._rx_cond:
-            n = len(self._rx_lines)
-            self._rx_lines.clear()
-        if self._debug:
-            self._trace_event("INFO", f"flush_rx() cleared {n} queued line(s); clear_serial_buffer={clear_serial_buffer}")
-        if clear_serial_buffer:
-            try:
-                self._serial.reset_input_buffer()
-            except Exception:
-                pass
-
-    # Background RX loop
     def _rx_loop(self) -> None:
         while not self._stop_evt.is_set():
             try:
-                raw = self._serial.readline()  # expects CRLF terminated replies
+                raw = self._serial.readline()  # replies end with CRLF
             except Exception as e:
                 if self._debug:
                     self._trace_event("INFO", f"RX exception: {e!r}")
@@ -371,7 +305,6 @@ class ElliptecDeviceBase:
                     self._trace_event("RX", "<timeout>", raw=b"")
                 continue
 
-            # Decode + strip CRLF
             txt = raw.decode("ascii", errors="replace").rstrip("\r\n")
             ts = time.monotonic()
 
@@ -382,25 +315,30 @@ class ElliptecDeviceBase:
             if self._debug:
                 self._trace_event("RX", txt, raw=raw)
 
-    def _send_raw(self, cmd: str) -> float:
-        """
-        Send a raw protocol packet (NO CRLF).
-        Returns the monotonic timestamp immediately after sending.
-        """
-        raw = cmd.encode("ascii")
-        if self._debug:
-            self._trace_event("TX", cmd, raw=raw)
+    # ------------------------------ utilities ------------------------------
 
+    def reset_parser(self) -> None:
+        """Send a single '\\r' to reset the device receive state machine."""
+        raw = b"\r"
+        if self._debug:
+            self._trace_event("TX", r"\r", raw=raw)
         self._serial.write(raw)
         self._serial.flush()
-        if self._settle_s:
-            time.sleep(self._settle_s)
-        return time.monotonic()
+
+    def flush_rx(self, *, clear_serial_buffer: bool = False) -> None:
+        """Clear queued RX lines (and optionally the OS RX buffer)."""
+        with self._rx_cond:
+            n = len(self._rx_lines)
+            self._rx_lines.clear()
+        if self._debug:
+            self._trace_event("INFO", f"flush_rx() cleared {n} queued line(s); clear_serial_buffer={clear_serial_buffer}")
+        if clear_serial_buffer:
+            try:
+                self._serial.reset_input_buffer()
+            except Exception:
+                pass
 
     def _pop_rx_line(self, *, timeout_s: float) -> Optional[Tuple[float, str, bytes]]:
-        """
-        Pop one buffered RX line (ts, text, raw).
-        """
         deadline = time.monotonic() + float(timeout_s)
         with self._rx_cond:
             while not self._rx_lines:
@@ -409,6 +347,66 @@ class ElliptecDeviceBase:
                     return None
                 self._rx_cond.wait(timeout=remaining)
             return self._rx_lines.popleft()
+
+    # ------------------------------ TX validation ---------------------------
+
+    def _validate_cmd(self, cmd: str) -> None:
+        """
+        Elliptec packets are fixed-length (no terminator on TX).
+        If you send the wrong number of bytes, the device parser can desync.
+        """
+        if not cmd or len(cmd) < 3:
+            raise ElliptecError(f"Invalid command (too short): {cmd!r}")
+
+        addr = _normalize_address(cmd[0])
+        mnemonic = cmd[1:3]
+
+        # expected lengths from protocol manual:
+        # - gs/gv/in : 3 bytes
+        # - ho0/ho1  : 4 bytes
+        # - svVV     : 5 bytes (VV = 2 hex digits)
+        # - mrXXXXXXXX / maXXXXXXXX : 11 bytes (Position = long32 = 8 hex digits)
+        if mnemonic in (HostCommand.GET_STATUS.value, HostCommand.GET_VELOCITY.value, HostCommand.GET_INFO.value):
+            if len(cmd) != 3:
+                raise ElliptecError(f"Packet length for '{mnemonic}' must be 3 bytes, got {len(cmd)}: {cmd!r}")
+            return
+
+        if mnemonic == HostCommand.HOME.value:
+            if len(cmd) != 4 or cmd[3] not in ("0", "1"):
+                raise ElliptecError(f"Packet for 'ho' must be 4 bytes like '{addr}ho0'/'{addr}ho1', got: {cmd!r}")
+            return
+
+        if mnemonic == HostCommand.SET_VELOCITY.value:
+            if len(cmd) != 5:
+                raise ElliptecError(f"Packet length for 'sv' must be 5 bytes, got {len(cmd)}: {cmd!r}")
+            vv = cmd[3:5].upper()
+            if any(c not in _HEX_DIGITS for c in vv):
+                raise ElliptecError(f"'sv' payload must be 2 hex digits, got: {cmd!r}")
+            return
+
+        if mnemonic in (HostCommand.MOVE_RELATIVE.value, HostCommand.MOVE_ABSOLUTE.value):
+            if len(cmd) != 11:
+                raise ElliptecError(
+                    f"Packet length for '{mnemonic}' must be 11 bytes ({addr}{mnemonic}<8 hex>), got {len(cmd)}: {cmd!r}"
+                )
+            payload = cmd[3:11].upper()
+            if any(c not in _HEX_DIGITS for c in payload):
+                raise ElliptecError(f"'{mnemonic}' payload must be 8 hex digits (long32), got: {cmd!r}")
+            return
+
+        # unknown mnemonic -> no strict validation (still trace)
+        return
+
+    def _send_raw(self, cmd: str) -> float:
+        self._validate_cmd(cmd)
+        raw = cmd.encode("ascii")
+        if self._debug:
+            self._trace_event("TX", cmd, raw=raw)
+        self._serial.write(raw)
+        self._serial.flush()
+        if self._settle_s:
+            time.sleep(self._settle_s)
+        return time.monotonic()
 
     def _send_and_wait_one(
         self,
@@ -419,12 +417,6 @@ class ElliptecDeviceBase:
         clear_rx_queue: bool = False,
         clear_rx_serial: bool = False,
     ) -> Optional[str]:
-        """
-        Send a command and wait for the *next matching* RX line.
-
-        - Does NOT flush RX by default (to avoid losing async replies).
-        - If predicate is None: returns the first line observed after TX timestamp.
-        """
         if clear_rx_queue or clear_rx_serial:
             self.flush_rx(clear_serial_buffer=clear_rx_serial)
 
@@ -437,34 +429,26 @@ class ElliptecDeviceBase:
                 return None
             ts, txt, _raw = item
 
-            # ignore anything that definitely happened before we sent
             if ts + 1e-3 < tx_ts:
                 continue
 
             if predicate is None or predicate(txt):
                 return txt
 
-            # otherwise: just keep consuming; it's already traced for debugging
-
         return None
 
     # ------------------------------ discovery -------------------------------
 
     def _find_addresses(self, *, min_address: str, max_address: str) -> List[str]:
-        """
-        Probe addresses in [min_address, max_address] by sending 'gs' and
-        checking for a well-formed 'GS' reply.
-        """
         found: List[str] = []
+        self.reset_parser()
         for a in _address_range(min_address, max_address):
-            # For scanning we DO clear the queued RX to keep correlation clean.
-            # We do NOT clear the serial driver buffer unless explicitly asked.
             reply = self._send_and_wait_one(
                 f"{a}{HostCommand.GET_STATUS.value}",
                 timeout_s=0.6,
                 predicate=lambda s, aa=a: (len(s) >= 5 and s[0] == aa and s[1:3] == ReplyCommand.STATUS.value),
                 clear_rx_queue=True,
-                clear_rx_serial=True,  # during scans, this is usually what you want
+                clear_rx_serial=True,
             )
             if reply is None:
                 continue
@@ -481,25 +465,11 @@ class ElliptecDeviceBase:
     def address(self) -> str:
         return self._address
 
-    def listen(self, duration_s: float = 5.0) -> None:
-        """
-        Passive RX logging for `duration_s` seconds.
-        (Useful when you want to see if the device is streaming replies.)
-        """
-        end = time.monotonic() + float(duration_s)
-        while time.monotonic() < end:
-            item = self._pop_rx_line(timeout_s=0.2)
-            if item is None:
-                continue
-            # already traced by thread; nothing else to do
-
     def get_status(self, *, timeout_s: float = 1.0) -> StatusCode:
         reply = self._send_and_wait_one(
             f"{self._address}{HostCommand.GET_STATUS.value}",
             timeout_s=timeout_s,
             predicate=lambda s: len(s) >= 5 and s[0] == self._address and s[1:3] == ReplyCommand.STATUS.value,
-            clear_rx_queue=False,
-            clear_rx_serial=False,
         )
         if reply is None:
             raise ElliptecError("Timeout waiting for status reply")
@@ -510,25 +480,17 @@ class ElliptecDeviceBase:
             f"{self._address}{HostCommand.GET_VELOCITY.value}",
             timeout_s=timeout_s,
             predicate=lambda s: len(s) >= 5 and s[0] == self._address and s[1:3] == ReplyCommand.VELOCITY.value,
-            clear_rx_queue=False,
-            clear_rx_serial=False,
         )
         if reply is None:
             raise ElliptecError("Timeout waiting for velocity reply")
         return _parse_velocity_reply(reply, self._address)
 
     def set_speed(self, percent: int, *, timeout_s: float = 1.0) -> None:
-        """
-        Set velocity compensation in percent (0..100).
-        Protocol: AsvVV with VV as 2 hex digits (00..64).
-        """
         vv = _percent_to_hex_byte(percent)
         reply = self._send_and_wait_one(
             f"{self._address}{HostCommand.SET_VELOCITY.value}{vv}",
             timeout_s=timeout_s,
             predicate=lambda s: len(s) >= 5 and s[0] == self._address and s[1:3] == ReplyCommand.STATUS.value,
-            clear_rx_queue=False,
-            clear_rx_serial=False,
         )
         if reply is None:
             raise ElliptecError("Timeout waiting for set_speed status reply")
@@ -537,37 +499,23 @@ class ElliptecDeviceBase:
             raise ElliptecError(f"set_speed failed with status {st.name}", status=st, reply=reply)
 
     def home(self, direction: HomeDirection = HomeDirection.CW, *, timeout_s: float = 30.0) -> None:
-        """
-        Home (ho). Direction: 0 = CW, 1 = CCW.
-        The device may answer:
-          - GS09 (busy) while moving
-          - PO........ when done
-          - or GSxx error
-        """
-        # Don't flush: we want to see everything.
-        _ = self._send_raw(f"{self._address}{HostCommand.HOME.value}{int(direction)}")
+        self._send_raw(f"{self._address}{HostCommand.HOME.value}{int(direction)}")
         self._wait_until_done(timeout_s=timeout_s)
 
     def move_relative(self, delta_counts: int, *, timeout_s: float = 30.0) -> None:
-        payload = _encode_long32(int(delta_counts))
-        _ = self._send_raw(f"{self._address}{HostCommand.MOVE_RELATIVE.value}{payload}")
+        payload = _encode_long32(delta_counts)
+        # => always 8 hex digits, so packet is exactly 11 bytes
+        self._send_raw(f"{self._address}{HostCommand.MOVE_RELATIVE.value}{payload}")
         self._wait_until_done(timeout_s=timeout_s)
 
     def move_absolute(self, position_counts: int, *, timeout_s: float = 30.0) -> None:
-        payload = _encode_long32(int(position_counts))
-        _ = self._send_raw(f"{self._address}{HostCommand.MOVE_ABSOLUTE.value}{payload}")
+        payload = _encode_long32(position_counts)
+        self._send_raw(f"{self._address}{HostCommand.MOVE_ABSOLUTE.value}{payload}")
         self._wait_until_done(timeout_s=timeout_s)
 
     # ------------------------------ motion wait -----------------------------
 
     def _wait_until_done(self, *, timeout_s: float) -> None:
-        """
-        Robust wait for motion completion.
-
-        Strategy:
-          - Prefer consuming async RX lines (GS.. / PO..).
-          - If nothing arrives for a short while, poll 'gs' without flushing RX.
-        """
         deadline = time.monotonic() + float(timeout_s)
         poll_interval_s = 0.15
         next_poll = time.monotonic()
@@ -575,13 +523,11 @@ class ElliptecDeviceBase:
         last_reply: Optional[str] = None
 
         while time.monotonic() < deadline:
-            # 1) consume any async replies quickly
             item = self._pop_rx_line(timeout_s=0.05)
             if item is not None:
                 _ts, line, _raw = item
                 last_reply = line
 
-                # filter out replies from other addresses (multi-drop bus)
                 if not line or line[0] != self._address or len(line) < 3:
                     continue
 
@@ -592,23 +538,17 @@ class ElliptecDeviceBase:
                         continue
                     if st != StatusCode.OK:
                         raise ElliptecError(f"Motion ended with error {st.name}", status=st, reply=line)
-                    # Some devices return GS00 when done
                     return
 
                 if cmd == ReplyCommand.POSITION.value:
-                    # done (position returned)
                     return
 
-                # other replies are ignored (but still logged)
-
-            # 2) poll status occasionally
             now = time.monotonic()
             if now >= next_poll:
                 next_poll = now + poll_interval_s
                 try:
                     st = self.get_status(timeout_s=0.6)
                 except ElliptecError:
-                    # if the device doesn't answer while moving, keep waiting
                     continue
 
                 if st == StatusCode.BUSY:
@@ -620,18 +560,12 @@ class ElliptecDeviceBase:
         raise ElliptecError("Timeout waiting for motion to complete", reply=last_reply)
 
 
-# ------------------------------- Angle helper -------------------------------
-
 def angle_to_counts(angle_rad: float, *, counts_per_rev: int = 262_144, wrap: bool = False) -> int:
     """
     Convert an angle in radians to encoder counts for a rotary axis (e.g. ELL14).
-
-    wrap=False: allow multi-turn values (e.g. 4*pi -> 2 rev)
-    wrap=True : wrap to (-pi, +pi]
     """
     rad = float(angle_rad)
     if wrap:
         two_pi = 2.0 * math.pi
         rad = (rad + math.pi) % two_pi - math.pi
-
     return int(round(rad / (2.0 * math.pi) * int(counts_per_rev)))
