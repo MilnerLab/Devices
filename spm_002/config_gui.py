@@ -24,8 +24,8 @@ class ConfigWindow:
         self._root.title("SPM-002 Configuration (x32)")
 
         # Tk variables
-        self._exposure_var = tk.StringVar(value="300.0")   # ms
-        self._average_var = tk.StringVar(value="10")
+        self._exposure_var = tk.StringVar(value="50.0")   # ms
+        self._average_var = tk.StringVar(value="5")
         self._dark_var = tk.IntVar(value=0)               # 0/1
         self._mode_var = tk.StringVar(value="0")
         self._scan_delay_var = tk.StringVar(value="0")

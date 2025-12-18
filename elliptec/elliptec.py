@@ -225,7 +225,7 @@ class ElliptecDeviceBase:
         # Command must NOT include CRLF; protocol uses fixed-length ASCII packets.
         self._serial.write(cmd.encode("ascii"))
         self._serial.flush()
-        time.sleep(0.02)
+        time.sleep(0.1)
 
     def _send_and_read_one(self, cmd: str) -> Optional[str]:
         """
@@ -263,6 +263,7 @@ class ElliptecDeviceBase:
         return self._address
 
     def get_status(self) -> StatusCode:
+        time.sleep(2)
         r = self._send_and_read_one(f"{self._address}{HostCommand.GET_STATUS.value}")
         if r is None:
             raise ElliptecError("Timeout waiting for status reply")
