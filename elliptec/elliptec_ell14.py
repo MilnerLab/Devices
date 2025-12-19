@@ -16,11 +16,9 @@ class Rotator(ElliptecDevice):
         self,
         port: str,
         *,
-        address: Optional[str] = None,
-        min_address: str = "0",
-        max_address: str = "F",
+        address: Optional[str] = None
     ) -> None:
-        super().__init__(port, address=address, min_address=min_address, max_address=max_address)
+        super().__init__(port, address=address)
         self.home()
         self._current_angle: Angle = Angle(0, AngleUnit.DEG)
 

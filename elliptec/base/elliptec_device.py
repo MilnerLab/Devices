@@ -7,7 +7,7 @@ from typing import Iterable, List, Optional
 from serial import EIGHTBITS, PARITY_NONE, STOPBITS_ONE, Serial
 from elliptec.base.enums import HomeDirection, HostCommand, ReplyCommand, StatusCode
 from elliptec.base.exceptions import ElliptecError
-from elliptec.base.helpers import _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
+from elliptec.base.helpers import _HEX_DIGITS, _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
 
 POLL_INTERVAL = float(0.2)
 MAX_POLLS = int(400)
@@ -29,9 +29,7 @@ class ElliptecDevice:
         self,
         port: str,
         *,
-        address: Optional[str] = None,
-        min_address: str = "0",
-        max_address: str = "F",
+        address: Optional[str] = None
     ) -> None:
         self._serial = Serial(
             port=port,
@@ -44,10 +42,7 @@ class ElliptecDevice:
         )
 
         if address is None:
-            addrs = self._find_addresses(
-                min_address=_normalize_address(min_address),
-                max_address=_normalize_address(max_address),
-            )
+            addrs = self._find_addresses()
             if not addrs:
                 raise ElliptecError(
                     f"No Elliptec device found on {port} in address range {min_address}..{max_address}."
@@ -162,15 +157,14 @@ class ElliptecDevice:
 
     # --- discovery ---------------------------------------------------------
 
-    def _find_addresses(self, *, min_address: str, max_address: str) -> List[str]:
+    def _find_addresses(self) -> List[str]:
         found: List[str] = []
 
         # Clear receiver state machine and stale bytes
         self._serial.write(b"\r")
         self._serial.flush()
         self._serial.reset_input_buffer()
-
-        for a in _iter_addresses(min_address, max_address):
+        for a in _iter_addresses(_HEX_DIGITS[0], _HEX_DIGITS[-1]):
             try:
                 self._serial.reset_input_buffer()
                 self._send_raw(f"{a}{HostCommand.GET_STATUS.value}")
