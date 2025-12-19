@@ -2,8 +2,8 @@ import math
 import time
 
 from typing import Optional
-from base_lib.math.enums import AngleUnit
-from base_lib.math.models import Angle, Range
+from base_core.math.enums import AngleUnit
+from base_core.math.models import Angle, Range
 from elliptec.base.elliptec_device import ElliptecDevice
 
 ANGLE_RANGE = Range(Angle(-90, AngleUnit.DEG), Angle(90, AngleUnit.DEG))
