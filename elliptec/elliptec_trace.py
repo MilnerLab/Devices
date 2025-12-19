@@ -10,26 +10,17 @@ from elliptec.base.exceptions import ElliptecError
 from elliptec.base.helpers import _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
 
 
-
-# ------------------------------ Base device -------------------------------
-
-
 class ElliptecDeviceBase:
     """
     Minimal Elliptec base class using *only serial* (no Thorlabs DLL).
 
-    Implements:
-      - home()
-      - move_relative()
-      - move_absolute()
-      - set_speed()  (sv velocity compensation)
+    Constructor params (unchanged):
+      __init__(port, *, address=None, min_address="0", max_address="F")
 
-    Notes:
-      - Address is a single hex digit '0'..'F'.
-      - Replies are CRLF terminated and can arrive asynchronously while moving.
-      - During motion, some controllers do NOT reliably answer 'gs' polls.
-        Therefore _wait_until_done() primarily waits for a PO reply.
-      - MECHANICAL_TIMEOUT (GS02) is treated as a soft/busy-like status.
+    Behaviour:
+      - Motion commands wait for PO using _query_reply(..., expect_reply=PO, watch_status=True)
+      - MECHANICAL_TIMEOUT (GS02) is treated as BUSY while waiting.
+      - Some firmwares may not emit PO for HOME; we fall back to one gp query.
     """
 
     def __init__(
@@ -40,9 +31,7 @@ class ElliptecDeviceBase:
         min_address: str = "0",
         max_address: str = "F",
     ) -> None:
-        # Keep the constructor params the same as your previous version.
         self._serial = self._open(port, timeout=float(0.5), write_timeout=float(0.5))
-
         self._current_status: StatusCode = StatusCode.OK
 
         if address is None:
@@ -80,16 +69,17 @@ class ElliptecDeviceBase:
     @property
     def status(self) -> StatusCode:
         """
-        Software-side current status.
+        Software-side status for your UI.
 
         - Set to BUSY when a motion command is issued.
-        - Set to OK when a PO reply is received.
-        - Updated when GS replies are seen.
+        - Set to OK when a PO is received (or after successful home fallback).
+        - Updated when GS replies are observed.
         """
         return self._current_status
 
     def _set_status(self, st: StatusCode) -> None:
-        self._current_status = st
+        # For UI purposes treat mechanical timeout as busy-like.
+        self._current_status = StatusCode.BUSY if st == StatusCode.MECHANICAL_TIMEOUT else st
 
     # --- low-level serial --------------------------------------------------
 
@@ -117,7 +107,6 @@ class ElliptecDeviceBase:
         """
         self._serial.write(cmd.encode("ascii"))
         self._serial.flush()
-        # Give the device a brief moment; helps on some USB-serial adapters.
         time.sleep(0.05)
 
     def _query_reply(
@@ -128,10 +117,16 @@ class ElliptecDeviceBase:
         expect_reply: ReplyCommand,
         clear_rx: bool = False,
         timeout_s: Optional[float] = None,
+        watch_status: bool = False,
     ) -> str:
         """
-        Send a command and return the first matching reply for (expect_addr, expect_reply),
-        ignoring unrelated lines (other addresses, different reply types).
+        Send cmd and return the first matching reply (expect_addr + expect_reply).
+
+        If watch_status=True while waiting for PO:
+          - observe GS replies for the same address,
+          - treat BUSY (09) + MECHANICAL_TIMEOUT (02) as keep-waiting,
+          - ignore OK (00) (keep waiting for PO),
+          - raise on any other GS error.
         """
         if clear_rx:
             self._serial.reset_input_buffer()
@@ -140,47 +135,68 @@ class ElliptecDeviceBase:
 
         per_line_timeout = float(self._serial.timeout or 0.5)
         deadline = time.monotonic() + float(timeout_s if timeout_s is not None else max(1.0, 2.0 * per_line_timeout))
+        last_line: Optional[str] = None
 
         while time.monotonic() < deadline:
             line = self._readline()
             if line is None:
                 continue
+            last_line = line
+
             if not line or len(line) < 3:
                 continue
             if line[0] != expect_addr:
                 continue
-            if line[1:3] != expect_reply.value:
+
+            reply_type = line[1:3]
+
+            # Optional observation of GS while waiting for PO
+            if watch_status and reply_type == ReplyCommand.STATUS.value:
+                st = _parse_status_reply(line, expect_addr)
+                self._set_status(st)
+                if st in (StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
+                    continue
+                if st == StatusCode.OK:
+                    # Some firmwares emit GS00 while still moving; keep waiting for PO.
+                    continue
+                raise ElliptecError(f"Motion ended with error {st.name}", status=st, reply=line)
+
+            if reply_type != expect_reply.value:
                 continue
+
+            # Matched
+            if expect_reply == ReplyCommand.POSITION:
+                self._set_status(StatusCode.OK)
             return line
 
-        raise ElliptecError(f"Timeout waiting for {expect_reply.value} reply", reply=None)
+        # Timeout
+        if watch_status:
+            self._set_status(StatusCode.COMMUNICATION_TIMEOUT)
+        raise ElliptecError(f"Timeout waiting for {expect_reply.value} reply", reply=last_line)
 
     # --- discovery ---------------------------------------------------------
 
     def _find_addresses(self, *, min_address: str, max_address: str) -> List[str]:
-        """
-        Probe addresses in [min_address, max_address] by sending 'gs' and
-        checking for a well-formed 'GS' reply.
-        """
         found: List[str] = []
 
-        # CR clears the device receiving state machine and cancels incomplete commands.
+        # Clear receiver state machine / stale bytes
         self._serial.write(b"\r")
         self._serial.flush()
         self._serial.reset_input_buffer()
 
         for a in _iter_addresses(min_address, max_address):
             try:
-                r = self._query_reply(
+                _ = self._query_reply(
                     f"{a}{HostCommand.GET_STATUS.value}",
                     expect_addr=a,
                     expect_reply=ReplyCommand.STATUS,
                     clear_rx=False,
+                    timeout_s=0.5,
+                    watch_status=False,
                 )
             except ElliptecError:
                 continue
-            if r:
-                found.append(a)
+            found.append(a)
 
         return found
 
@@ -191,22 +207,17 @@ class ElliptecDeviceBase:
         return self._address
 
     def get_status(self) -> StatusCode:
-        """
-        Query device status (GSxx). Note that while moving some controllers may
-        not reply reliably; use the .status property for software-side state.
-        """
         r = self._query_reply(
             f"{self._address}{HostCommand.GET_STATUS.value}",
             expect_addr=self._address,
             expect_reply=ReplyCommand.STATUS,
-            clear_rx=False,  # do not flush away async GS/PO
+            clear_rx=False,
         )
         st = _parse_status_reply(r, self._address)
-        self._set_status(st if st != StatusCode.MECHANICAL_TIMEOUT else StatusCode.BUSY)
+        self._set_status(st)
         return st
 
     def get_speed(self) -> int:
-        """Return velocity compensation in percent (0..100)."""
         r = self._query_reply(
             f"{self._address}{HostCommand.GET_VELOCITY.value}",
             expect_addr=self._address,
@@ -216,24 +227,17 @@ class ElliptecDeviceBase:
         return _parse_velocity_reply(r, self._address)
 
     def get_position_counts(self) -> int:
-        """Return current position as signed 32-bit encoder counts."""
         r = self._query_reply(
             f"{self._address}{HostCommand.GET_POSITION.value}",
             expect_addr=self._address,
             expect_reply=ReplyCommand.POSITION,
             clear_rx=False,
         )
-        # If we got a PO, device is not busy anymore.
-        self._set_status(StatusCode.OK)
         return _parse_position_reply(r, self._address)
 
     # --- motion / control --------------------------------------------------
 
     def set_speed(self, percent: int) -> None:
-        """
-        Set velocity compensation (% of max) via 'sv'.
-        Example: 50% -> Asv32. Device typically replies with AGS00.
-        """
         vv = _encode_u8_percent(percent)
         r = self._query_reply(
             f"{self._address}{HostCommand.SET_VELOCITY.value}{vv}",
@@ -242,43 +246,67 @@ class ElliptecDeviceBase:
             clear_rx=False,
         )
         st = _parse_status_reply(r, self._address)
-        # Some devices may return BUSY/MECH_TIMEOUT briefly; treat that as soft.
-        if st in (StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
-            self._set_status(StatusCode.BUSY)
-            return
         self._set_status(st)
-        if st != StatusCode.OK:
+        if st not in (StatusCode.OK, StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
             raise ElliptecError(f"Device returned error status {st.name} after set_speed", status=st, reply=r)
 
     def home(self, direction: HomeDirection = HomeDirection.CW, *, timeout_s: float = 30.0) -> None:
-        """
-        Home the stage. For rotary stages, direction is used (0=CW, 1=CCW).
-        For other devices, the direction byte is ignored by firmware.
-        """
         # Clear stale replies so we don't accidentally consume an old PO.
         self._serial.reset_input_buffer()
         self._set_status(StatusCode.BUSY)
-        self._send_raw(f"{self._address}{HostCommand.HOME.value}{int(direction)}")
-        self._wait_until_po(timeout_s=timeout_s)
+
+        try:
+            # Prefer PO if the firmware emits it.
+            _ = self._query_reply(
+                f"{self._address}{HostCommand.HOME.value}{int(direction)}",
+                expect_addr=self._address,
+                expect_reply=ReplyCommand.POSITION,
+                clear_rx=False,
+                timeout_s=timeout_s,
+                watch_status=True,
+            )
+            return
+        except ElliptecError:
+            # Fallback: some firmwares appear to not push PO for home; query gp once.
+            _ = self._query_reply(
+                f"{self._address}{HostCommand.GET_POSITION.value}",
+                expect_addr=self._address,
+                expect_reply=ReplyCommand.POSITION,
+                clear_rx=False,
+                timeout_s=min(5.0, timeout_s),
+                watch_status=False,
+            )
+            self._set_status(StatusCode.OK)
 
     def move_absolute(self, position_counts: int, *, timeout_s: float = 30.0) -> None:
-        """Move to an absolute position in encoder counts (signed 32-bit)."""
         payload = _encode_long32(position_counts)
         self._serial.reset_input_buffer()
         self._set_status(StatusCode.BUSY)
-        self._send_raw(f"{self._address}{HostCommand.MOVE_ABSOLUTE.value}{payload}")
-        self._wait_until_po(timeout_s=timeout_s)
+
+        _ = self._query_reply(
+            f"{self._address}{HostCommand.MOVE_ABSOLUTE.value}{payload}",
+            expect_addr=self._address,
+            expect_reply=ReplyCommand.POSITION,
+            clear_rx=False,
+            timeout_s=timeout_s,
+            watch_status=True,
+        )
 
     def move_relative(self, delta_counts: int, *, timeout_s: float = 30.0) -> None:
-        """Move by a relative offset in encoder counts (signed 32-bit)."""
         payload = _encode_long32(delta_counts)
         self._serial.reset_input_buffer()
         self._set_status(StatusCode.BUSY)
-        self._send_raw(f"{self._address}{HostCommand.MOVE_RELATIVE.value}{payload}")
-        self._wait_until_po(timeout_s=timeout_s)
+
+        _ = self._query_reply(
+            f"{self._address}{HostCommand.MOVE_RELATIVE.value}{payload}",
+            expect_addr=self._address,
+            expect_reply=ReplyCommand.POSITION,
+            clear_rx=False,
+            timeout_s=timeout_s,
+            watch_status=True,
+        )
 
     def stop(self, *, timeout_s: float = 5.0) -> None:
-        """Send 'st' (only supported on some devices / modes)."""
         r = self._query_reply(
             f"{self._address}{HostCommand.STOP.value}",
             expect_addr=self._address,
@@ -287,64 +315,6 @@ class ElliptecDeviceBase:
             timeout_s=timeout_s,
         )
         st = _parse_status_reply(r, self._address)
-        if st in (StatusCode.OK, StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
-            self._set_status(StatusCode.BUSY if st != StatusCode.OK else StatusCode.OK)
-            return
         self._set_status(st)
-        raise ElliptecError(f"Device returned error status {st.name} after stop()", status=st, reply=r)
-
-    # --- internal waiting --------------------------------------------------
-
-    def _wait_until_po(self, *, timeout_s: float) -> None:
-        """
-        Wait ONLY for a PO reply from the device (preferred).
-
-        We still *observe* any GS replies that arrive:
-          - GS09 (busy) -> keep waiting
-          - GS02 (mechanical timeout) -> treated as busy, keep waiting
-          - GS00 -> keep waiting until PO (some firmwares send GS00 before PO)
-          - GS(other) -> raise
-
-        No 'gs' polling is performed here.
-        """
-        deadline = time.monotonic() + float(timeout_s)
-        last_reply: Optional[str] = None
-
-        while time.monotonic() < deadline:
-            line = self._readline()
-            if line is None:
-                continue
-
-            last_reply = line
-
-            if not line or len(line) < 3 or line[0] != self._address:
-                continue
-
-            cmd = line[1:3]
-
-            if cmd == ReplyCommand.POSITION.value:
-                self._set_status(StatusCode.OK)
-                return
-
-            if cmd == ReplyCommand.STATUS.value:
-                st = _parse_status_reply(line, self._address)
-
-                # Treat MECHANICAL_TIMEOUT as soft/busy-like.
-                if st in (StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
-                    self._set_status(StatusCode.BUSY)
-                    continue
-
-                # Some devices might send OK while we're still waiting for PO.
-                if st == StatusCode.OK:
-                    # don't flip to OK yet; motion completion is PO in this mode
-                    continue
-
-                self._set_status(st)
-                raise ElliptecError(f"Motion ended with error {st.name}", status=st, reply=line)
-
-            # Ignore other reply types (GV, etc.)
-            continue
-
-        # No PO received within overall timeout
-        self._set_status(StatusCode.COMMUNICATION_TIMEOUT)
-        raise ElliptecError("Timeout waiting for PO (motion completion)", reply=last_reply)
+        if st not in (StatusCode.OK, StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
+            raise ElliptecError(f"Device returned error status {st.name} after stop()", status=st, reply=r)
