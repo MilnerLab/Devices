@@ -4,7 +4,7 @@ import time
 from typing import Optional
 from base_lib.math.enums import AngleUnit
 from base_lib.math.models import Angle, Range
-from elliptec.elliptec_trace import ElliptecDeviceBase
+from elliptec.elliptec_trace import ElliptecDevice
 
 # === Konstanten ===
 ANGLE_RANGE = Range(Angle(-90, AngleUnit.DEG), Angle(90, AngleUnit.DEG))
@@ -12,7 +12,7 @@ OUT_OF_RANGE_RELATIVE_ANGLE = Angle(90, AngleUnit.DEG)
 HOME_ANGLE = Angle(0, AngleUnit.DEG)
 COUNTS_PER_REV = 262_144  # ELL14: 262144 pulses/rev (0x40000) :contentReference[oaicite:3]{index=3}
 
-class Rotator(ElliptecDeviceBase):
+class Rotator(ElliptecDevice):
     def __init__(
         self,
         port: str,
