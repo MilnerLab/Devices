@@ -168,6 +168,7 @@ class ElliptecDeviceBase:
         debug: bool = False,
         debug_verbose: bool = False,
         debug_log_path: Optional[str] = None,
+        ignore_mechanical_timeout: bool = True,
         trace_maxlen: int = 10_000,
     ) -> None:
         self._settle_s = float(settle_s)
@@ -175,6 +176,7 @@ class ElliptecDeviceBase:
         # trace
         self._debug = bool(debug)
         self._debug_verbose = bool(debug_verbose)
+        self._ignore_mechanical_timeout = bool(ignore_mechanical_timeout)
         self._trace: Deque[SerialTraceEvent] = deque(maxlen=int(trace_maxlen))
         self._logger = self._make_logger(port=port, log_path=debug_log_path) if self._debug else None
 
@@ -536,6 +538,11 @@ class ElliptecDeviceBase:
                     st = _parse_status_reply(line, self._address)
                     if st == StatusCode.BUSY:
                         continue
+                    if st == StatusCode.MECHANICAL_TIMEOUT and self._ignore_mechanical_timeout:
+                        # Some devices report MECHANICAL_TIMEOUT when a move takes long, but still continue.
+                        if self._debug:
+                            self._trace_event('WARN', 'Ignoring MECHANICAL_TIMEOUT during motion wait')
+                        continue
                     if st != StatusCode.OK:
                         raise ElliptecError(f"Motion ended with error {st.name}", status=st, reply=line)
                     return
@@ -552,6 +559,10 @@ class ElliptecDeviceBase:
                     continue
 
                 if st == StatusCode.BUSY:
+                    continue
+                if st == StatusCode.MECHANICAL_TIMEOUT and self._ignore_mechanical_timeout:
+                    if self._debug:
+                        self._trace_event('WARN', 'Ignoring MECHANICAL_TIMEOUT during motion wait (polled)')
                     continue
                 if st != StatusCode.OK:
                     raise ElliptecError(f"Motion ended with error {st.name}", status=st, reply=last_reply)
