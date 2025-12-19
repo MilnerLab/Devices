@@ -4,7 +4,7 @@
 			"path": "."
 		},
 		{
-			"path": "../Base_Lib"
+			"path": "../Base_Core"
 		}
 	],
 	"settings": {}
