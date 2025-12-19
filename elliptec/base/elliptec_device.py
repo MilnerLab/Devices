@@ -9,6 +9,9 @@ from elliptec.base.enums import HomeDirection, HostCommand, ReplyCommand, Status
 from elliptec.base.exceptions import ElliptecError
 from elliptec.base.helpers import _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
 
+POLL_INTERVAL = float(0.2)
+MAX_POLLS = int(400)
+
 class ElliptecDevice:
     """
     Very simple Elliptec serial driver:
@@ -29,8 +32,6 @@ class ElliptecDevice:
         address: Optional[str] = None,
         min_address: str = "0",
         max_address: str = "F",
-        poll_interval_s: float = 0.2,
-        max_polls: int = 400,
     ) -> None:
         self._serial = Serial(
             port=port,
@@ -41,9 +42,6 @@ class ElliptecDevice:
             timeout=0.5,
             write_timeout=0.5,
         )
-
-        self.poll_interval_s = float(poll_interval_s)
-        self.max_polls = int(max_polls)
 
         if address is None:
             addrs = self._find_addresses(
@@ -127,11 +125,11 @@ class ElliptecDevice:
         """
         Poll GS repeatedly until we receive GS00, or until max_polls is exceeded.
         """
-        for _ in range(self.max_polls):
+        for _ in range(MAX_POLLS):
             self._send_raw(f"{self._address}{HostCommand.GET_STATUS.value}")
             st = self._read_one_status()
             if st is None:
-                time.sleep(self.poll_interval_s)
+                time.sleep(POLL_INTERVAL)
                 continue
 
             if st == StatusCode.OK:
@@ -141,7 +139,7 @@ class ElliptecDevice:
             # Busy-like conditions: keep waiting
             if st in (StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
                 self._status = StatusCode.BUSY
-                time.sleep(self.poll_interval_s)
+                time.sleep(POLL_INTERVAL)
                 continue
 
             # Any other status is a hard failure

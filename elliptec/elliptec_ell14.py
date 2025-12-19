@@ -1,30 +1,28 @@
+import math
 import time
-import clr
-from decimal import Decimal
 
-# === Konstanten ===
+from typing import Optional
+from base_lib.math.enums import AngleUnit
+from base_lib.math.models import Angle, Range
+from elliptec.base.elliptec_device import ElliptecDevice
+
 ANGLE_RANGE = Range(Angle(-90, AngleUnit.DEG), Angle(90, AngleUnit.DEG))
 OUT_OF_RANGE_RELATIVE_ANGLE = Angle(90, AngleUnit.DEG)
 HOME_ANGLE = Angle(0, AngleUnit.DEG)
+COUNTS_PER_REV = 262_144  # ELL14: 262144 pulses/rev (0x40000) :contentReference[oaicite:3]{index=3}
 
-# === DLL laden ===
-clr.AddReference(r"C:\Program Files\Thorlabs\Elliptec\Thorlabs.Elliptec.ELLO_DLL.dll")
-from Thorlabs.Elliptec.ELLO_DLL import ELLDevicePort, ELLDevices, ELLBaseDevice
-
-
-class ElliptecRotator:
+class Rotator(ElliptecDevice):
     def __init__(
         self,
-        port: str = "COM6",
+        port: str,
+        *,
+        address: Optional[str] = None,
         min_address: str = "0",
         max_address: str = "F",
     ) -> None:
-        self._device = None
-        self._ell_devices = None
-
+        super().__init__(port, address=address, min_address=min_address, max_address=max_address)
+        self.home()
         self._current_angle: Angle = Angle(0, AngleUnit.DEG)
-
-        self._initialize(port, min_address, max_address)
 
 
     def rotate(self, angle: Angle) -> None:
@@ -38,58 +36,14 @@ class ElliptecRotator:
         print("Current wp angle:", self._current_angle.Deg)
         print("--------------------------")
 
-    def home(self) -> None:
-        self._device.Home(ELLBaseDevice.DeviceDirection.Linear)
-        time.sleep(1.0)
-        self._current_angle = Angle(0, AngleUnit.DEG)
-
-    def close(self) -> None:
-        try:
-            ELLDevicePort.Disconnect()
-        except Exception:
-            pass
 
     # ------------------------------------------------------------------    
     # internal helpers
     # ------------------------------------------------------------------    
 
-    def _initialize(self, port, min_address, max_address) -> None:
-        print(f"Connecting to Elliptec device on {port} ...")
-        ELLDevicePort.Connect(port)
-
-        ell_devices = ELLDevices()
-        devices = ell_devices.ScanAddresses(min_address, max_address)
-        if not devices:
-            raise RuntimeError("No Elliptec devices found on bus.")
-
-        addressed_device = None
-        for dev in devices:
-            if ell_devices.Configure(dev):
-                addressed_device = ell_devices.AddressedDevice(dev[0])
-                break
-
-        if addressed_device is None:
-            raise RuntimeError("No configurable Elliptec device found.")
-
-        self._ell_devices = ell_devices
-        self._device = addressed_device
-
-        device_info = self._device.DeviceInfo
-        print("Connected to Elliptec device:")
-        for line in device_info.Description():
-            print("  ", line)
-
-        print("Homing device...")
-        self._device.Home(ELLBaseDevice.DeviceDirection.Linear)
-        time.sleep(1.0)
-        print("Device homed.")
-
-        # Startzustand: delta = 0
-        self._current_angle = Angle(0, AngleUnit.DEG)
 
     def _move_relative(self, angle: Angle) -> None:
-        d = Decimal(angle.Deg)
-        self._device.MoveRelative(d)
+        self.move_relative(self._angle_to_counts(angle))
         self._current_angle = Angle(self._current_angle + angle)
         time.sleep(2.0)
 
@@ -106,5 +60,8 @@ class ElliptecRotator:
             print("corrected min")
 
         self._move_relative(correction)
-
         
+    def _angle_to_counts(self, angle: Angle) -> int:
+        return int(round(angle.Rad / (2.0 * math.pi) * COUNTS_PER_REV))
+        
+    
