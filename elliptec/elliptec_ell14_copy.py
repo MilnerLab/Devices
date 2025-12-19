@@ -4,7 +4,7 @@ import time
 from typing import Optional
 from base_lib.math.enums import AngleUnit
 from base_lib.math.models import Angle, Range
-from elliptec.elliptec import ElliptecDeviceBase
+from elliptec.elliptec_trace import ElliptecDeviceBase
 
 # === Konstanten ===
 ANGLE_RANGE = Range(Angle(-90, AngleUnit.DEG), Angle(90, AngleUnit.DEG))

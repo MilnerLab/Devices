@@ -173,7 +173,7 @@ class ElliptecDeviceBase:
         min_address: str = "0",
         max_address: str = "F",
     ) -> None:
-        self._serial = self._open(port, timeout=float(0.5), write_timeout=float(0.5))
+        self._serial = self._open(port, timeout=float(0.5), write_timeout=float(1))
 
         if address is None:
             addrs = self._find_addresses(min_address=_normalize_address(min_address), max_address=_normalize_address(max_address))
@@ -225,7 +225,7 @@ class ElliptecDeviceBase:
         # Command must NOT include CRLF; protocol uses fixed-length ASCII packets.
         self._serial.write(cmd.encode("ascii"))
         self._serial.flush()
-        time.sleep(0.1)
+        time.sleep(0.2)
 
     def _send_and_read_one(self, cmd: str, *, clear_rx: bool = False) -> Optional[str]:
         """
