@@ -72,10 +72,6 @@ class ElliptecDevice:
     # --- properties --------------------------------------------------------
 
     @property
-    def address(self) -> str:
-        return self._address
-
-    @property
     def status(self) -> StatusCode:
         """Software-side latest known status (updated from GS polls)."""
         return self._status
