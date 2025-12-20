@@ -1,13 +1,13 @@
 {
   "python.defaultInterpreterPath": "${workspaceFolder}/phase_control/.venv64/Scripts/python.exe",
   "python.analysis.extraPaths": [
-    "../Base_Lib"
+    "../Base_Core"
   ],
   "python.analysis.autoImportCompletions": true,
   "python.analysis.indexing": true,
     "python.analysis.packageIndexDepths": [
         {
-            "name": "base_lib",
+            "name": "base_core",
             "depth": 5,
             "includeAllSymbols": true
         }
