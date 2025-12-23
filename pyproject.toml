@@ -9,7 +9,5 @@ description = "Local drivers for the SPM-002 spectrometer and Elliptec waveplate
 requires-python = ">=3.10"
 dependencies = []  # kannst du leer lassen, wir arbeiten mit _requirements_x32/_x64
 
-[tool.setuptools.packages.find]
-# Such ab Repo-Root nach Paketen (Ordner mit __init__.py)
-where = ["."]
-include = ["spm_002*", "elliptec*"]
+[tool.setuptools]
+packages = ["elliptec", "spm_002"]
