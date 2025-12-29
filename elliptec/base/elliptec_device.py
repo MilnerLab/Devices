@@ -27,10 +27,19 @@ class ElliptecDevice:
 
     def __init__(
         self,
-        port: str,
-        *,
-        address: Optional[str] = None
     ) -> None:
+        self._serial: Optional[Serial] = None
+        self._address: Optional[str] = None
+
+    @property
+    def serial(self):
+        if self._serial is not None:
+            return self._serial
+        else:
+            raise ValueError("No open serial connection.")
+    # --- lifecycle ---------------------------------------------------------
+
+    def open(self, port: str, address: Optional[str] = None) -> None:
         self._serial = Serial(
             port=port,
             baudrate=9600,
@@ -40,28 +49,24 @@ class ElliptecDevice:
             timeout=0.5,
             write_timeout=0.5,
         )
-
-        if address is None:
+        if address is not None:
+            self._address = _normalize_address(address)
+        else:
             addrs = self._find_addresses()
             if not addrs:
                 raise ElliptecError(
-                    f"No Elliptec device found on {port} in address range {min_address}..{max_address}."
+                    f"No Elliptec device found on {self._port} in address range."
                 )
             if len(addrs) > 1:
                 raise ElliptecError(
-                    f"Multiple Elliptec devices found on {port}: {addrs}. Pass address=... to select one."
+                    f"Multiple Elliptec devices found on {self._pport}: {addrs}. Pass address=... to select one."
                 )
             self._address = addrs[0]
-        else:
-            self._address = _normalize_address(address)
 
         self._status: StatusCode = StatusCode.OK
-
-    # --- lifecycle ---------------------------------------------------------
-
+        
     def close(self) -> None:
-        if self._serial.is_open:
-            self._serial.close()
+            self.serial.close()
 
     def __enter__(self) -> "ElliptecDevice":
         return self
@@ -79,15 +84,15 @@ class ElliptecDevice:
     # --- low level ---------------------------------------------------------
 
     def _readline(self) -> Optional[str]:
-        raw = self._serial.read_until(b"\n")  # \r\n terminated
+        raw = self.serial.read_until(b"\n")  # \r\n terminated
         if not raw:
             return None
         return raw.strip().decode("ascii", errors="replace")
 
     def _send_raw(self, cmd: str) -> None:
         # Elliptec uses fixed-length packets; do NOT append CRLF.
-        self._serial.write(cmd.encode("ascii"))
-        self._serial.flush()
+        self.serial.write(cmd.encode("ascii"))
+        self.serial.flush()
         # Small pacing helps with some adapters
         time.sleep(0.05)
 
@@ -100,7 +105,7 @@ class ElliptecDevice:
         """
         t0 = time.monotonic()
         # Try to read a few lines within one serial timeout window
-        while time.monotonic() - t0 < float(self._serial.timeout or 0.5):
+        while time.monotonic() - t0 < float(self.serial.timeout or 0.5):
             line = self._readline()
             if line is None:
                 return None
@@ -145,7 +150,7 @@ class ElliptecDevice:
         Send any command, then enforce the 'only proceed after GS00' policy.
         """
         # Clear stale replies, to avoid consuming an old GS00 immediately.
-        self._serial.reset_input_buffer()
+        self.serial.reset_input_buffer()
         self._status = StatusCode.BUSY
 
         self._send_raw(cmd)
@@ -157,12 +162,12 @@ class ElliptecDevice:
         found: List[str] = []
 
         # Clear receiver state machine and stale bytes
-        self._serial.write(b"\r")
-        self._serial.flush()
-        self._serial.reset_input_buffer()
+        self.serial.write(b"\r")
+        self.serial.flush()
+        self.serial.reset_input_buffer()
         for a in _iter_addresses(_HEX_DIGITS[0], _HEX_DIGITS[-1]):
             try:
-                self._serial.reset_input_buffer()
+                self.serial.reset_input_buffer()
                 self._send_raw(f"{a}{HostCommand.GET_STATUS.value}")
                 line = self._readline()
                 if line and len(line) >= 5 and line[0] == a and line[1:3] == ReplyCommand.STATUS.value:
@@ -175,7 +180,7 @@ class ElliptecDevice:
     # --- public commands ---------------------------------------------------
 
     def get_status(self) -> StatusCode:
-        self._serial.reset_input_buffer()
+        self.serial.reset_input_buffer()
         self._send_raw(f"{self._address}{HostCommand.GET_STATUS.value}")
         st = self._read_one_status()
         if st is None:
@@ -183,7 +188,7 @@ class ElliptecDevice:
         return st
 
     def get_speed(self) -> int:
-        self._serial.reset_input_buffer()
+        self.serial.reset_input_buffer()
         self._send_raw(f"{self._address}{HostCommand.GET_VELOCITY.value}")
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
@@ -199,7 +204,7 @@ class ElliptecDevice:
         self._send_and_wait_ok(f"{self._address}{HostCommand.SET_VELOCITY.value}{vv}")
 
     def get_position_counts(self) -> int:
-        self._serial.reset_input_buffer()
+        self.serial.reset_input_buffer()
         self._send_raw(f"{self._address}{HostCommand.GET_POSITION.value}")
         deadline = time.monotonic() + 2.0
         while time.monotonic() < deadline:
