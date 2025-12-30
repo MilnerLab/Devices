@@ -19,7 +19,6 @@ class Rotator(ElliptecDevice):
         address: Optional[str] = None
     ) -> None:
         super().__init__(port, address=address)
-        self.home()
         self._current_angle: Angle = Angle(0, AngleUnit.DEG)
 
 
