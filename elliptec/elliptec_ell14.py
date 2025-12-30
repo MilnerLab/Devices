@@ -13,12 +13,9 @@ COUNTS_PER_REV = 262_144  # ELL14: 262144 pulses/rev (0x40000) :contentReference
 
 class Rotator(ElliptecDevice):
     def __init__(
-        self,
-        port: str,
-        *,
-        address: Optional[str] = None
+        self
     ) -> None:
-        super().__init__(port, address=address)
+        super().__init__()
         self._current_angle: Angle = Angle(0, AngleUnit.DEG)
 
 
