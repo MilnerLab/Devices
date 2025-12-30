@@ -25,7 +25,7 @@ class Rotator(ElliptecDevice):
             return
 
         new_angle = Angle(self._current_angle + angle)
-        self._validate_new_delta_angle(new_angle)
+        # self._validate_new_delta_angle(new_angle)
         self._move_relative(angle)
         print("Current wp angle:", self._current_angle.Deg)
         print("--------------------------")
