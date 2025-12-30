@@ -39,7 +39,6 @@ class Rotator(ElliptecDevice):
     def _move_relative(self, angle: Angle) -> None:
         self.move_relative(self._angle_to_counts(angle))
         self._current_angle = Angle(self._current_angle + angle)
-        time.sleep(2.0)
 
     def _validate_new_delta_angle(self, new_angle: Angle) -> None:
         
