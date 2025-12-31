@@ -16,7 +16,7 @@ class Rotator(ElliptecDevice):
         self
     ) -> None:
         super().__init__()
-        self._current_angle: Angle = Angle(0, AngleUnit.DEG)
+        self._current_angle: float = 0
 
 
     def rotate(self, angle: Angle) -> None:
@@ -24,11 +24,10 @@ class Rotator(ElliptecDevice):
         if float(angle) == 0.0:
             return
 
-        new_angle = Angle(self._current_angle + angle)
+        new_angle = self._current_angle + angle.Deg
         # self._validate_new_delta_angle(new_angle)
         self._move_relative(angle)
-        print("Current wp angle:", self._current_angle.Deg)
-        print("--------------------------")
+        
 
 
     # ------------------------------------------------------------------    
@@ -37,8 +36,10 @@ class Rotator(ElliptecDevice):
 
 
     def _move_relative(self, angle: Angle) -> None:
+        self._current_angle = self._current_angle + angle.Deg
+        print("Current wp angle:", self._current_angle)
+        print("--------------------------")
         self.move_relative(self._angle_to_counts(angle))
-        self._current_angle = Angle(self._current_angle + angle)
 
     def _validate_new_delta_angle(self, new_angle: Angle) -> None:
         
