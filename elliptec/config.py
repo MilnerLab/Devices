@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
+from base_core.math.enums import AngleUnit
 from base_core.math.models import Angle, Range
-from elliptec.elliptec_ell14 import AngleUnit
 
 
 @dataclass
