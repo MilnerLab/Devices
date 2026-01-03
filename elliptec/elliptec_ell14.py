@@ -20,6 +20,7 @@ class Rotator(ElliptecDevice):
 
     def apply_config(self):
         self.set_speed(self._config.speed)
+        print(self.get_position_counts())
 
     def rotate(self, angle: Angle) -> None:
         
@@ -40,6 +41,8 @@ class Rotator(ElliptecDevice):
 
     def _move_relative(self, angle: Angle) -> None:
         self.move_relative(self._angle_to_counts(angle))
+        print(self.get_position_counts())
+        
         self._current_angle = Angle(self._current_angle + angle, wrap= False)
         time.sleep(2.0)
 
