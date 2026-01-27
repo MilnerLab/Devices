@@ -61,3 +61,7 @@ class Rotator(ElliptecDevice):
         
     def _angle_to_counts(self, angle: Angle) -> int:
         return int(round(angle.Rad / (2.0 * math.pi) * COUNTS_PER_REV))
+    
+    def _counts_to_angle(counts: int) -> Angle:
+        rad = (counts / COUNTS_PER_REV) * (2.0 * math.pi)
+        return Angle(rad, AngleUnit.RAD)
