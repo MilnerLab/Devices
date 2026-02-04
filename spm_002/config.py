@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from pathlib import Path
 
 # Repository root (…/SPM-002)
@@ -23,3 +23,15 @@ class SpectrometerConfig:
     dark_subtraction: int = 0  # 0 = off, 1 = on
     mode: int = 0              # 0 = continuous mode
     scan_delay: int = 0        # used only in certain trigger modes
+
+    def to_json(self) -> dict:
+        return asdict(self)
+
+    @classmethod
+    def from_json(cls, d: dict) -> "SpectrometerConfig":
+        return cls(**{k: d[k] for k in cls.__dataclass_fields__ if k in d})
+    
+    def update_from_json(self, d: dict) -> None:
+        for k in self.__dataclass_fields__:
+            if k in d:
+                setattr(self, k, d[k])
