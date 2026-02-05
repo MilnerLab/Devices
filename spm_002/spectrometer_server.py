@@ -4,7 +4,7 @@ import threading
 from typing import Any, Dict
 
 from spm_002.config import SpectrometerConfig
-from spm_002.enums import MsgType
+from spm_002.enums import CmdName, MsgType
 from spm_002.models import SpectrumData
 from spm_002.spectrometer import Spectrometer
 
