@@ -1,4 +1,5 @@
 # acquisition/spm002/spectrometer.py
+import time
 from typing import Optional, List
 import ctypes as ct
 
@@ -205,8 +206,8 @@ class Spectrometer:
 
         counts = [spectrum_buffer[i] for i in range(npix)]
 
-        return SpectrumData.from_raw(
+        return SpectrumData(
             counts=counts,
             wavelengths=self._wavelengths,
-            config=self.config,
+            timestamp_ns=time.time_ns(),
         )

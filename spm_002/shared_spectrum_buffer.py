@@ -5,21 +5,14 @@ import numpy as np
 from base_core.framework.subprocess.shared_memory.models import SharedRingBufferSpec, SlotHeader
 from base_core.framework.subprocess.shared_memory.shared_ring_buffer import SharedRingBuffer
 
-class SharedSpectrumBufferProtocol:
-    CMD_CONFIGURE_BUFFER = "configure_shared_spectrum_buffer"
-    CMD_SLOT_GRANTED = "spectrum_slot_granted"
-
-    EVT_FRAME_WRITTEN = "spectrum_frame_written"
-    EVT_FRAME_ACK = "spectrum_frame_ack"
 
 class SharedSpectrumBuffer(SharedRingBuffer):
     """
-    Payload layout per slot:
-        frame[0, :] -> wavelengths
-        frame[1, :] -> intensities
+    Ring buffer for optical spectra.
 
-    The whole payload uses one dtype, exactly like SharedRingBufferSpec.
-    So wavelengths and intensities must share the same dtype.
+    Payload layout per slot:
+        row 0  ->  wavelengths  (written once on first acquisition)
+        row 1  ->  intensities  (updated every acquisition)
     """
 
     def __init__(
@@ -63,10 +56,7 @@ class SharedSpectrumBuffer(SharedRingBuffer):
         return self.payload_view(slot)[1, :]
 
     def initialize_wavelengths(self, wavelengths: np.ndarray) -> None:
-        """
-        Copy the wavelength axis into row 0 of all slots once.
-        Call this explicitly on first setup from the writer process.
-        """
+        """Copy the wavelength axis into row 0 of every slot. Call once on first write."""
         wavelengths = np.asarray(wavelengths, dtype=self.spec.np_dtype)
 
         if wavelengths.shape != (self.pixel_count,):
@@ -86,17 +76,15 @@ class SharedSpectrumBuffer(SharedRingBuffer):
         *,
         slot: int,
         intensities: np.ndarray,
-        frame_id: int,
+        item_id: int,
         timestamp_ns: int,
         wavelengths: np.ndarray | None = None,
     ) -> None:
         """
-        If wavelengths are provided, row 0 is refreshed in all slots first.
-        Afterwards only row 1 of the selected slot is updated.
+        Write one spectrum into the given slot.
 
-        Typical usage:
-            first call  -> pass wavelengths=...
-            later calls -> omit wavelengths
+        Pass `wavelengths` on the first call; omit it on subsequent ones.
+        Payload written: payload first, header last (coordinator handoff pattern).
         """
         if wavelengths is not None:
             self.initialize_wavelengths(wavelengths)
@@ -117,7 +105,7 @@ class SharedSpectrumBuffer(SharedRingBuffer):
         self.write_header(
             slot,
             SlotHeader(
-                frame_id=frame_id,
+                item_id=item_id,
                 timestamp_ns=timestamp_ns,
                 payload_nbytes=self.spec.slot_payload_size,
             ),
