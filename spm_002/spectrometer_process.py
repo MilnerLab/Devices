@@ -25,7 +25,7 @@ class SpectrometerSubprocess(
 ):
     def __init__(self) -> None:
         registry = base_registry().extend(SetSpectrometerConfig)
-        super().__init__(registry, source="spectrometer")
+        super().__init__(registry, source="spectrometer", buffer_id="spectrometer")
 
         self._cfg: SpectrometerConfig | None = None
         self._cfg_lock = threading.Lock()
