@@ -15,30 +15,33 @@ from base_core.framework.subprocess.shared_memory.models import (
     ItemDescriptor,
     SharedRingBufferSpec,
 )
-from base_core.framework.subprocess.granted_slot_writer_process_base import (
-    GrantedSlotWriterProcessBase,
-)
+from base_core.framework.subprocess.subprocess_app import SubprocessApp
+from base_core.framework.subprocess.worker import ProducerWorker
+from messages import Message
 
 
-class SpectrometerSubprocess(
-    GrantedSlotWriterProcessBase[SharedSpectrumBuffer, SpectrumData]
-):
+class SpectrometerWorker(ProducerWorker[SharedSpectrumBuffer, SpectrumData]):
+    name = "spectrometer"
+    buffer_id = "spectrometer"
+    messages = [SetSpectrometerConfig]
+
     def __init__(self) -> None:
-        registry = base_registry().extend(SetSpectrometerConfig)
-        super().__init__(registry, source="spectrometer", buffer_id="spectrometer")
-
+        super().__init__()
         self._cfg: SpectrometerConfig | None = None
         self._cfg_lock = threading.Lock()
         self._cfg_ready = threading.Event()
-
         self._spectrometer: Spectrometer | None = None
         self._first_write = True
 
-        self.on(SetSpectrometerConfig, self._handle_set_config)
+    # ------------------------------------------------------------------
+    # Command routing (called from stdin thread by SubprocessApp)
+    # ------------------------------------------------------------------
 
-    # ------------------------------------------------------------------
-    # Config handling
-    # ------------------------------------------------------------------
+    def handle(self, msg: Message, request_id: str | None) -> None:
+        if isinstance(msg, SetSpectrometerConfig):
+            self._handle_set_config(msg, request_id)
+        else:
+            super().handle(msg, request_id)
 
     def _handle_set_config(
         self, msg: SetSpectrometerConfig, request_id: str | None
@@ -56,35 +59,28 @@ class SpectrometerSubprocess(
         self.reply_ok(request_id)
 
     # ------------------------------------------------------------------
-    # GrantedSlotWriterProcessBase hooks
+    # ProducerWorker hooks
     # ------------------------------------------------------------------
 
     def attach_buffer(self, spec: SharedRingBufferSpec) -> SharedSpectrumBuffer:
         return SharedSpectrumBuffer.attach(spec)
 
-    def acquire_measurement(
-        self, stop_event: threading.Event
-    ) -> SpectrumData | None:
-        if not self._cfg_ready.is_set():
+    def acquire(self) -> SpectrumData | None:
+        if not self._cfg_ready.wait(timeout=0.1):
             return None
-
         with self._cfg_lock:
             if self._spectrometer is None:
                 self._spectrometer = Spectrometer(config=self._cfg)
                 self._spectrometer.__enter__()
             return self._spectrometer.acquire_spectrum()
 
-    def write_measurement_to_slot(
-        self, *, measurement: SpectrumData, item: ItemDescriptor
-    ) -> None:
+    def write_to_slot(self, *, data: SpectrumData, item: ItemDescriptor) -> None:
         wavelengths: np.ndarray | None = None
-        if self._first_write and measurement.wavelengths is not None:
-            wavelengths = np.asarray(
-                measurement.wavelengths, dtype=self.buffer.spec.np_dtype
-            )
+        if self._first_write and data.wavelengths is not None:
+            wavelengths = np.asarray(data.wavelengths, dtype=self.buffer.spec.np_dtype)
             self._first_write = False
 
-        intensities = np.asarray(measurement.counts, dtype=self.buffer.spec.np_dtype)
+        intensities = np.asarray(data.counts, dtype=self.buffer.spec.np_dtype)
 
         self.buffer.write_spectrum(
             slot=item.slot,
@@ -98,14 +94,19 @@ class SpectrometerSubprocess(
     # Lifecycle
     # ------------------------------------------------------------------
 
-    def main(self, stop_event: threading.Event) -> None:
-        try:
-            super().main(stop_event)
-        finally:
-            if self._spectrometer is not None:
+    def _reset(self) -> None:
+        super()._reset()
+        self._cfg_ready.clear()
+        self._first_write = True
+        if self._spectrometer is not None:
+            try:
                 self._spectrometer.__exit__(None, None, None)
-                self._spectrometer = None
+            except Exception:
+                pass
+            self._spectrometer = None
 
 
 if __name__ == "__main__":
-    SpectrometerSubprocess().run()
+    app = SubprocessApp(base_registry(), source="spectrometer")
+    app.add_worker(SpectrometerWorker())
+    app.run()
