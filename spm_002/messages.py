@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from messages import Message, Kind
+from base_core.framework.subprocess.messages import Kind, Message
 from spm_002.config import SpectrometerConfig
 
 
