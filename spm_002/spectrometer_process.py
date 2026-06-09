@@ -41,14 +41,19 @@ class SpectrometerSubprocess(
     # ------------------------------------------------------------------
 
     def _handle_set_config(
-        self, msg: SetSpectrometerConfig, envelope: dict
+        self, msg: SetSpectrometerConfig, request_id: str | None
     ) -> None:
         with self._cfg_lock:
+            previous = self._cfg
             self._cfg = msg.config
             if self._spectrometer is not None:
-                self._spectrometer.configure(self._cfg)
+                try:
+                    self._spectrometer.configure(self._cfg)
+                except Exception:
+                    self._cfg = previous
+                    raise
         self._cfg_ready.set()
-        self.reply_ok(envelope)
+        self.reply_ok(request_id)
 
     # ------------------------------------------------------------------
     # GrantedSlotWriterProcessBase hooks
