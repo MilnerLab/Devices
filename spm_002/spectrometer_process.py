@@ -10,7 +10,7 @@ from spm_002.models import SpectrumData
 from spm_002.shared_spectrum_buffer import SharedSpectrumBuffer
 from spm_002.spectrometer import Spectrometer
 
-from base_core.framework.subprocess.shared_memory.base_protocol import base_registry
+from base_core.framework.subprocess.shared_memory.shared_memory_base_messages import base_registry
 from base_core.framework.subprocess.shared_memory.models import (
     ItemDescriptor,
     SharedRingBufferSpec,
