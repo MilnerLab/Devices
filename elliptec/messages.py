@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from mailbox import Message
 
-from messages import Kind, Message
+from base_core.framework.subprocess.messages import Kind
+
 
 
 @dataclass(frozen=True)
