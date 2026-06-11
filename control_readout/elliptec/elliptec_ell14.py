@@ -5,6 +5,7 @@ from typing import Optional
 from base_core.math.enums import AngleUnit
 from base_core.math.models import Angle, Range
 from elliptec.base.elliptec_device import ElliptecDevice
+from elliptec.base.enums import HomeDirection
 from elliptec.config import ELL14Config
 
 COUNTS_PER_REV = 262_144  # ELL14: 262144 pulses/rev (0x40000) :contentReference[oaicite:3]{index=3}
@@ -17,6 +18,14 @@ class Rotator(ElliptecDevice):
         super().__init__()
         self._config = config
         self._current_angle: Angle = Angle(0, AngleUnit.DEG, wrap= False)
+
+    @property
+    def current_angle(self) -> Angle:
+        return self._current_angle
+
+    def home(self, direction: HomeDirection = HomeDirection.CW) -> None:
+        super().home(direction)
+        self._current_angle = Angle(0, AngleUnit.RAD, wrap=False)
 
     def apply_config(self):
         self.set_speed(self._config.speed)

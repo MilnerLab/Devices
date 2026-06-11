@@ -10,4 +10,4 @@ requires-python = ">=3.10"
 dependencies = []  # kannst du leer lassen, wir arbeiten mit _requirements_x32/_x64
 
 [tool.setuptools]
-packages = ["elliptec", "spm_002"]
+packages = ["elliptec", "spm_002", "control_readout"]
