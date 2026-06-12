@@ -1,7 +1,7 @@
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
-from base_core.framework.subprocess.shared_memory.models import Primitive, PrimitiveSerde
+from base_core.framework.serialization.serde import Primitive, PrimitiveSerde
 
 
 # Repository root (…/SPM-002)

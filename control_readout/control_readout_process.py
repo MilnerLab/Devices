@@ -1,16 +1,26 @@
 from __future__ import annotations
 
-from base_core.framework.subprocess.shared_memory.shared_memory_base_messages import base_registry
-from base_core.framework.subprocess.subprocess_app import SubprocessApp
-from elliptec.config import ELL14Config
-from elliptec.messages import HomeRotator, Rotate, RotatorHomed, RotatorMoved
-from elliptec.rotator_worker import RotatorWorker
+from base_core.framework.shm.writer_subprocess_main import WriterSubprocessMain
+from control_readout.elliptec.config import ELL14Config
+from control_readout.elliptec.ell14_worker import RotatorWorker
+
+
+class ControlReadoutProcess(WriterSubprocessMain):
+    """
+    Subprocess entry point for the control readout service.
+
+    Hosts the RotatorWorker (ELL14 half-wave plate rotator).
+    The pressure buffer and worker are registered here when implemented.
+    """
+
+    def setup(self) -> None:
+        self.register_worker(RotatorWorker(
+            bus=self.bus,
+            connector=self.connector,
+            config=ELL14Config(),
+            port="COM3",
+        ))
 
 
 if __name__ == "__main__":
-    app = SubprocessApp(
-        base_registry().extend(Rotate, HomeRotator, RotatorMoved, RotatorHomed),
-        source="control_readout",
-    )
-    app.add_worker(RotatorWorker(port="COM3", config=ELL14Config()))
-    app.run()
+    ControlReadoutProcess.main()

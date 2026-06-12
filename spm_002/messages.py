@@ -2,13 +2,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from base_core.framework.subprocess.messages import Kind, Message
+from base_core.ipc.codec import register
+from base_core.ipc.message import OKReply, Request
 from spm_002.config import SpectrometerConfig
 
 
+@register
 @dataclass(frozen=True)
-class SetSpectrometerConfig(Message):
-    """main → subprocess: apply a new acquisition configuration."""
-    NAME = "set_spectrometer_config"
-    KIND = Kind.COMMAND
-    config: SpectrometerConfig
+class SetSpectrometerConfig(Request[OKReply]):
+    """Main process → subprocess: apply a new SpectrometerConfig."""
+    config: SpectrometerConfig = None  # type: ignore[assignment]
