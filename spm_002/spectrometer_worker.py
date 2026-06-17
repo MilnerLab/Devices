@@ -37,7 +37,7 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
         config: SpectrometerConfig,
         get_buffer,
     ) -> None:
-        super().__init__(WORKER_ID, bus, connector, SpectrumBuffer, get_buffer)
+        super().__init__(WORKER_ID, bus, connector, get_buffer)
         self._config = config
         self._spectrometer: Spectrometer | None = None
         self._item_id = 0

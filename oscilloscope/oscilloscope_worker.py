@@ -42,7 +42,7 @@ class OscilloscopeWorker(WriterWorker[ScopeBuffer]):
         config: ScopeConfig,
         get_buffer: Callable[[], ScopeBuffer],
     ) -> None:
-        super().__init__(WORKER_ID, bus, connector, ScopeBuffer, get_buffer)
+        super().__init__(WORKER_ID, bus, connector, get_buffer)
         self._config = config
         self._scope = None
         self._item_id = 0
