@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from base_core.ipc.worker import BaseWorker
+from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.rgv100bl.config import Rgv100Config
 from control_readout.rgv100bl.messages import HomeHwp, HwpAngleUpdate, RotateHwpTo
@@ -26,7 +26,7 @@ def _make_driver(config: Rgv100Config):
     return XpsRgvRotator(config)
 
 
-class Rgv100blWorker(BaseWorker):
+class Rgv100blWorker(ThreadedWorker):
     def __init__(
         self,
         bus: "EventBus",
@@ -54,6 +54,7 @@ class Rgv100blWorker(BaseWorker):
         self._stop()
         self._start()
 
+    @worker_thread
     def _on_rotate(self, msg: RotateHwpTo) -> None:
         if self._rotator is None:
             self._reply_error(msg, "RGV100BL not started")
@@ -66,6 +67,7 @@ class Rgv100blWorker(BaseWorker):
             log.exception("Rgv100blWorker: rotate failed")
             self._reply_error(msg, str(exc))
 
+    @worker_thread
     def _on_home(self, msg: HomeHwp) -> None:
         if self._rotator is None:
             self._reply_error(msg, "RGV100BL not started")

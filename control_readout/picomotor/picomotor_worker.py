@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from base_core.ipc.worker import BaseWorker
+from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.picomotor.config import PicomotorConfig
 from control_readout.picomotor.messages import StepBy, StepsMoved
@@ -26,7 +26,7 @@ def _make_driver(config: PicomotorConfig):
     return Picomotor8742(config)
 
 
-class PicomotorWorker(BaseWorker):
+class PicomotorWorker(ThreadedWorker):
     def __init__(
         self,
         bus: "EventBus",
@@ -53,6 +53,7 @@ class PicomotorWorker(BaseWorker):
         self._stop()
         self._start()
 
+    @worker_thread
     def _on_step_by(self, msg: StepBy) -> None:
         if self._driver is None:
             self._reply_error(msg, "Picomotor not started")

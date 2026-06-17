@@ -4,7 +4,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from base_core.ipc.worker import BaseWorker
+from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.servo_shutter.config import ServoShutterConfig
 from control_readout.servo_shutter.messages import ArmStateChanged, BlockArm, UnblockArm
@@ -24,7 +24,7 @@ def _make_driver(config: ServoShutterConfig):
     return ManualShutterStub(config)
 
 
-class ServoShutterWorker(BaseWorker):
+class ServoShutterWorker(ThreadedWorker):
     def __init__(
         self,
         bus: "EventBus",
@@ -52,9 +52,11 @@ class ServoShutterWorker(BaseWorker):
         self._stop()
         self._start()
 
+    @worker_thread
     def _on_block(self, msg: BlockArm) -> None:
         self._set(msg, msg.arm, blocked=True)
 
+    @worker_thread
     def _on_unblock(self, msg: UnblockArm) -> None:
         self._set(msg, msg.arm, blocked=False)
 

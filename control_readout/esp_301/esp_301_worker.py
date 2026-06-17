@@ -13,7 +13,7 @@ import logging
 import threading
 from typing import TYPE_CHECKING
 
-from base_core.ipc.worker import BaseWorker
+from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 from control_readout.esp_301.config import Esp301Config
 from control_readout.esp_301.esp_driver import EspDriver
 from control_readout.esp_301.messages import (
@@ -35,7 +35,7 @@ log = logging.getLogger(__name__)
 WORKER_ID = "esp301"
 
 
-class Esp301Worker(BaseWorker):
+class Esp301Worker(ThreadedWorker):
     def __init__(
         self,
         bus: "EventBus",
@@ -129,18 +129,23 @@ class Esp301Worker(BaseWorker):
     # Command handlers
     # ------------------------------------------------------------------
 
+    @worker_thread
     def _on_move_to(self, msg: MoveTo) -> None:
         self._do(msg, lambda d: (d.move_to(msg.axis, msg.position), self._mark_moving(msg.axis)))
 
+    @worker_thread
     def _on_move_relative(self, msg: MoveRelative) -> None:
         self._do(msg, lambda d: (d.move_relative(msg.axis, msg.delta), self._mark_moving(msg.axis)))
 
+    @worker_thread
     def _on_home(self, msg: HomeAxis) -> None:
         self._do(msg, lambda d: (d.home(msg.axis), self._mark_moving(msg.axis)))
 
+    @worker_thread
     def _on_stop(self, msg: StopAxis) -> None:
         self._do(msg, lambda d: d.stop(msg.axis))
 
+    @worker_thread
     def _on_set_velocity(self, msg: SetVelocity) -> None:
         self._do(msg, lambda d: d.set_velocity(msg.axis, msg.velocity))
 
