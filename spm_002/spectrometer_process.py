@@ -23,7 +23,6 @@ class SpectrometerProcess(BaseSubprocessMain):
             SpectrometerWorker(
                 bus=self.bus,
                 connector=self.connector,
-                config=SpectrometerConfig(),
                 get_buffer=lambda: self.get_buffer(SpectrumBuffer),
             )
         )

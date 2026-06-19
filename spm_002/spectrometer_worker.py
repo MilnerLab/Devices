@@ -34,11 +34,10 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
         self,
         bus: EventBus,
         connector: SubprocessPipelineConnector,
-        config: SpectrometerConfig,
         get_buffer,
     ) -> None:
         super().__init__(WORKER_ID, bus, connector, get_buffer)
-        self._config = config
+        self._config = None
         self._spectrometer: Spectrometer | None = None
         self._item_id = 0
 
@@ -59,12 +58,10 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
         log.debug("SpectrometerWorker: started acquisition")
 
     def _stop(self) -> None:
-        if self._prod_handle is not None:
-            fut = self._prod_handle.future
-            self._stop_producing()
-            try:
-                fut.result(timeout=5.0)
-            except Exception:
+        handle = self._stop_producing()
+        if handle is not None:
+            handle.wait(timeout=5.0)
+            if not handle.done_event.is_set():
                 log.warning("SpectrometerWorker: acquisition did not stop in 5 s")
         if self._spectrometer is not None:
             try:
@@ -82,12 +79,21 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
     def _on_set_config(self, msg: SetSpectrometerConfig) -> None:
         self._config = msg.config
         if self._spectrometer is not None and self._spectrometer.is_open:
+            was_producing = self._prod_handle is not None
+            if was_producing:
+                handle = self._stop_producing()
+                if handle is not None:
+                    handle.wait(timeout=5.0)
             try:
                 self._spectrometer.configure(self._config)
             except Exception as exc:
                 log.exception("SpectrometerWorker: configure failed")
                 self._reply_error(msg, str(exc))
+                if was_producing:
+                    self._start_producing(self._acquire_producer, on_item=self._on_acquired)
                 return
+            if was_producing:
+                self._start_producing(self._acquire_producer, on_item=self._on_acquired)
         self._reply_ok(msg)
 
     def _acquire_producer(self, stop: threading.Event):

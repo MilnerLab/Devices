@@ -12,7 +12,7 @@ class ScopeMemorySpec(MemorySpec):
     def __init__(
         self,
         name: str,
-        slot_count: int = 8,
+        slot_count: int = 2,
         channels: int = 2,
         n_samples: int = 2000,
     ) -> None:

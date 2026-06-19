@@ -61,12 +61,10 @@ class OscilloscopeWorker(WriterWorker[ScopeBuffer]):
         self._start_producing(self._acquire_producer, on_item=self._on_acquired)
 
     def _stop(self) -> None:
-        if self._prod_handle is not None:
-            fut = self._prod_handle.future
-            self._stop_producing()
-            try:
-                fut.result(timeout=5.0)
-            except Exception:
+        handle = self._stop_producing()
+        if handle is not None:
+            handle.wait(timeout=5.0)
+            if not handle.done_event.is_set():
                 log.warning("OscilloscopeWorker: acquisition did not stop in 5 s")
         if self._scope is not None:
             try:

@@ -1,3 +1,4 @@
+import sys
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -7,10 +8,11 @@ from base_core.framework.serialization.serde import Primitive, PrimitiveSerde
 # Repository root (…/SPM-002)
 REPO_ROOT = Path(__file__).resolve().parents[1]
 
-# Path to the 32-bit Python used for acquisition
-PYTHON32_PATH = str(
-    REPO_ROOT / ".venv32" / "Scripts" / "python.exe"
-)
+# Path to the .venv32 Python (32-bit on Windows for DLL; 64-bit on Linux for subprocess dev)
+if sys.platform == "win32":
+    PYTHON32_PATH = str(REPO_ROOT / ".venv32" / "Scripts" / "python.exe")
+else:
+    PYTHON32_PATH = str(REPO_ROOT / ".venv32" / "bin" / "python")
 
 
 @dataclass

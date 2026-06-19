@@ -23,7 +23,7 @@ class SpectrumMemorySpec(MemorySpec):
     def __init__(
         self,
         name: str,
-        slot_count: int = 8,
+        slot_count: int = 2,
         pixel_count: int = 3648,
     ) -> None:
         super().__init__(

@@ -1,6 +1,9 @@
 # acquisition/spm002/dll.py
+from __future__ import annotations
+
 import ctypes as ct
 import os
+import sys
 
 from spm_002.exceptions import SpectrometerError
 
@@ -56,54 +59,44 @@ def _load_photon_spectr() -> ct.WinDLL:
     return ct.WinDLL(dll_path)
 
 
-# Global handle to the DLL
-lib = _load_photon_spectr()
+# Global handle to the DLL — None on Linux (DLL is Windows-only)
+lib = _load_photon_spectr() if sys.platform == "win32" else None
 
 
 # ---------------------------------------------------------------------------
-# Function prototypes (only the ones we need)
+# Function prototypes (only the ones we need; skipped on Linux where lib is None)
 # ---------------------------------------------------------------------------
 
-# int PHO_EnumerateDevices(void);
-lib.PHO_EnumerateDevices.argtypes = []
-lib.PHO_EnumerateDevices.restype = c_int
+if lib is not None:
+    lib.PHO_EnumerateDevices.argtypes = []
+    lib.PHO_EnumerateDevices.restype = c_int
 
-# int PHO_Open(int dev);
-lib.PHO_Open.argtypes = [c_int]
-lib.PHO_Open.restype = c_int
+    lib.PHO_Open.argtypes = [c_int]
+    lib.PHO_Open.restype = c_int
 
-# int PHO_Close(int dev);
-lib.PHO_Close.argtypes = [c_int]
-lib.PHO_Close.restype = c_int
+    lib.PHO_Close.argtypes = [c_int]
+    lib.PHO_Close.restype = c_int
 
-# int PHO_GetPn(int dev, int* pn);
-lib.PHO_GetPn.argtypes = [c_int, POINTER(c_int)]
-lib.PHO_GetPn.restype = c_int
+    lib.PHO_GetPn.argtypes = [c_int, POINTER(c_int)]
+    lib.PHO_GetPn.restype = c_int
 
-# int PHO_GetLut(int dev, float* lut, int size);
-lib.PHO_GetLut.argtypes = [c_int, POINTER(c_float), c_int]
-lib.PHO_GetLut.restype = c_int
+    lib.PHO_GetLut.argtypes = [c_int, POINTER(c_float), c_int]
+    lib.PHO_GetLut.restype = c_int
 
-# int PHO_SetTime(int dev, float exposure_ms);
-lib.PHO_SetTime.argtypes = [c_int, c_float]
-lib.PHO_SetTime.restype = c_int
+    lib.PHO_SetTime.argtypes = [c_int, c_float]
+    lib.PHO_SetTime.restype = c_int
 
-# int PHO_GetTime(int dev, float* exposure_ms);
-lib.PHO_GetTime.argtypes = [c_int, POINTER(c_float)]
-lib.PHO_GetTime.restype = c_int
+    lib.PHO_GetTime.argtypes = [c_int, POINTER(c_float)]
+    lib.PHO_GetTime.restype = c_int
 
-# int PHO_SetAverage(int dev, int average);
-lib.PHO_SetAverage.argtypes = [c_int, c_int]
-lib.PHO_SetAverage.restype = c_int
+    lib.PHO_SetAverage.argtypes = [c_int, c_int]
+    lib.PHO_SetAverage.restype = c_int
 
-# int PHO_SetDs(int dev, int dark_subtraction);
-lib.PHO_SetDs.argtypes = [c_int, c_int]
-lib.PHO_SetDs.restype = c_int
+    lib.PHO_SetDs.argtypes = [c_int, c_int]
+    lib.PHO_SetDs.restype = c_int
 
-# int PHO_SetMode(int dev, int mode, int scan_delay);
-lib.PHO_SetMode.argtypes = [c_int, c_int, c_int]
-lib.PHO_SetMode.restype = c_int
+    lib.PHO_SetMode.argtypes = [c_int, c_int, c_int]
+    lib.PHO_SetMode.restype = c_int
 
-# int PHO_Acquire(int dev, int start_pixel, int num_pixels, unsigned short* buffer);
-lib.PHO_Acquire.argtypes = [c_int, c_int, c_int, POINTER(c_ushort)]
-lib.PHO_Acquire.restype = c_int
+    lib.PHO_Acquire.argtypes = [c_int, c_int, c_int, POINTER(c_ushort)]
+    lib.PHO_Acquire.restype = c_int
