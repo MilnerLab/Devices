@@ -1,6 +1,6 @@
 from typing import Iterable
-from elliptec.base.enums import ReplyCommand, StatusCode
-from elliptec.base.exceptions import ElliptecError
+from control_readout.elliptec.base.enums import ReplyCommand, StatusCode
+from control_readout.elliptec.base.exceptions import ElliptecError
 
 
 _HEX_DIGITS = "0123456789ABCDEF"

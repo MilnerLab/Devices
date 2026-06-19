@@ -1,6 +1,6 @@
 from typing import Optional
 
-from elliptec.base.enums import StatusCode
+from control_readout.elliptec.base.enums import StatusCode
 
 
 

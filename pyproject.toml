@@ -10,4 +10,7 @@ requires-python = ">=3.10"
 dependencies = []  # kannst du leer lassen, wir arbeiten mit _requirements_x32/_x64
 
 [tool.setuptools]
-packages = ["elliptec", "spm_002", "control_readout"]
+# NOTE (local fix, flag to upstream): `elliptec` moved under `control_readout/elliptec`
+# on main, so the top-level `elliptec` package no longer exists and broke the editable
+# build. It is importable as `control_readout.elliptec`.
+packages = ["spm_002", "control_readout", "oscilloscope"]

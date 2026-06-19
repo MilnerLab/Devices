@@ -3,7 +3,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from base_core.ipc.worker import BaseWorker
+from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 from control_readout.elliptec.config import ELL14Config
 from control_readout.elliptec.elliptec_ell14 import Rotator
 from control_readout.elliptec.messages import (
@@ -22,7 +22,7 @@ log = logging.getLogger(__name__)
 WORKER_ID = "rotator"
 
 
-class RotatorWorker(BaseWorker):
+class RotatorWorker(ThreadedWorker):
     def __init__(
         self,
         bus: EventBus,
@@ -44,15 +44,16 @@ class RotatorWorker(BaseWorker):
         self._rotator.open(self._port)
         self._rotator.apply_config()
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         if self._rotator is not None:
             self._rotator.close()
             self._rotator = None
 
     def _reset(self) -> None:
-        self._stop()
+        self._pause()
         self._start()
 
+    @worker_thread
     def _on_rotate(self, msg: Rotate) -> None:
         if self._rotator is None:
             self._reply_error(msg, "Rotator not started")
@@ -65,6 +66,7 @@ class RotatorWorker(BaseWorker):
             log.exception("RotatorWorker: rotate failed")
             self._reply_error(msg, str(exc))
 
+    @worker_thread
     def _on_home(self, msg: HomeRotator) -> None:
         if self._rotator is None:
             self._reply_error(msg, "Rotator not started")
