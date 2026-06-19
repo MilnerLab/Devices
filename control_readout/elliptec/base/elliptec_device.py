@@ -5,9 +5,9 @@ from enum import Enum, IntEnum
 from typing import Iterable, List, Optional
 
 from serial import EIGHTBITS, PARITY_NONE, STOPBITS_ONE, Serial
-from elliptec.base.enums import HomeDirection, HostCommand, ReplyCommand, StatusCode
-from elliptec.base.exceptions import ElliptecError
-from elliptec.base.helpers import _HEX_DIGITS, _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
+from control_readout.elliptec.base.enums import HomeDirection, HostCommand, ReplyCommand, StatusCode
+from control_readout.elliptec.base.exceptions import ElliptecError
+from control_readout.elliptec.base.helpers import _HEX_DIGITS, _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
 
 POLL_INTERVAL = float(0.2)
 MAX_POLLS = int(400)

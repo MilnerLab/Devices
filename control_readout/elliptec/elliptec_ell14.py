@@ -4,9 +4,9 @@ import time
 from typing import Optional
 from base_core.math.enums import AngleUnit
 from base_core.math.models import Angle, Range
-from elliptec.base.elliptec_device import ElliptecDevice
-from elliptec.base.enums import HomeDirection
-from elliptec.config import ELL14Config
+from control_readout.elliptec.base.elliptec_device import ElliptecDevice
+from control_readout.elliptec.base.enums import HomeDirection
+from control_readout.elliptec.config import ELL14Config
 
 COUNTS_PER_REV = 262_144  # ELL14: 262144 pulses/rev (0x40000) :contentReference[oaicite:3]{index=3}
 
