@@ -25,7 +25,7 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
     Runs the acquisition loop inside the spectrometer subprocess.
 
     On StartWorker: opens the hardware, applies config, starts the acquisition stream.
-    On StopWorker:  drains the stream, closes the hardware.
+    On PauseWorker:  drains the stream, closes the hardware.
     On ResetWorker: stop + start.
     On SetSpectrometerConfig: applies new settings (live while running or buffered for next start).
     """
@@ -48,32 +48,31 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
         )
 
     def _start(self) -> None:
-        if self._spectrometer is not None:
-            log.warning("SpectrometerWorker: _start() called while already running")
-            return
-        self._spectrometer = Spectrometer(self._config)
-        self._spectrometer.open()
-        self._spectrometer.apply_config()
+        if self._spectrometer is None:
+            self._spectrometer = Spectrometer(self._config)
+            self._spectrometer.open()
+            self._spectrometer.apply_config()
         self._start_producing(self._acquire_producer, on_item=self._on_acquired)
         log.debug("SpectrometerWorker: started acquisition")
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         handle = self._stop_producing()
         if handle is not None:
             handle.wait(timeout=5.0)
             if not handle.done_event.is_set():
                 log.warning("SpectrometerWorker: acquisition did not stop in 5 s")
+        
+
+    def _reset(self) -> None:
         if self._spectrometer is not None:
             try:
                 self._spectrometer.close()
             except Exception:
                 log.exception("SpectrometerWorker: error closing device")
             self._spectrometer = None
-        log.debug("SpectrometerWorker: stopped")
-
-    def _reset(self) -> None:
-        self._stop()
-        self._start()
+            
+        if self._config is not None:
+            self._config = None
 
     @worker_thread
     def _on_set_config(self, msg: SetSpectrometerConfig) -> None:

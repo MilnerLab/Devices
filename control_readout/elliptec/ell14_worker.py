@@ -44,13 +44,13 @@ class RotatorWorker(ThreadedWorker):
         self._rotator.open(self._port)
         self._rotator.apply_config()
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         if self._rotator is not None:
             self._rotator.close()
             self._rotator = None
 
     def _reset(self) -> None:
-        self._stop()
+        self._pause()
         self._start()
 
     @worker_thread

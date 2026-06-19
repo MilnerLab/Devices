@@ -45,13 +45,13 @@ class Rgv100blWorker(ThreadedWorker):
         self._rotator = _make_driver(self._config)
         self._rotator.open()
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         if self._rotator is not None:
             self._rotator.close()
             self._rotator = None
 
     def _reset(self) -> None:
-        self._stop()
+        self._pause()
         self._start()
 
     @worker_thread

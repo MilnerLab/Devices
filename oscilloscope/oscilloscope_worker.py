@@ -60,7 +60,7 @@ class OscilloscopeWorker(WriterWorker[ScopeBuffer]):
         self._scope.apply_config()
         self._start_producing(self._acquire_producer, on_item=self._on_acquired)
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         handle = self._stop_producing()
         if handle is not None:
             handle.wait(timeout=5.0)
@@ -74,7 +74,7 @@ class OscilloscopeWorker(WriterWorker[ScopeBuffer]):
             self._scope = None
 
     def _reset(self) -> None:
-        self._stop()
+        self._pause()
         self._start()
 
     @worker_thread

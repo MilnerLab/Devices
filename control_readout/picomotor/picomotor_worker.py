@@ -44,13 +44,13 @@ class PicomotorWorker(ThreadedWorker):
         self._driver = _make_driver(self._config)
         self._driver.open()
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         if self._driver is not None:
             self._driver.close()
             self._driver = None
 
     def _reset(self) -> None:
-        self._stop()
+        self._pause()
         self._start()
 
     @worker_thread

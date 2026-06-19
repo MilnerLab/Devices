@@ -74,7 +74,7 @@ class Esp301Worker(ThreadedWorker):
         )
         self._poll_thread.start()
 
-    def _stop(self) -> None:
+    def _pause(self) -> None:
         self._poll_stop.set()
         if self._poll_thread is not None:
             self._poll_thread.join(timeout=2.0)
@@ -86,7 +86,7 @@ class Esp301Worker(ThreadedWorker):
             self._moving.clear()
 
     def _reset(self) -> None:
-        self._stop()
+        self._pause()
         self._start()
 
     # ------------------------------------------------------------------
