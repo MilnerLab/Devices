@@ -1,8 +1,10 @@
 import sys
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from pathlib import Path
 
-from base_core.framework.serialization.serde import Primitive, PrimitiveSerde
+from base_core.framework.serialization.serde import PrimitiveSerde
+from base_core.quantities.enums import Prefix
+from base_core.quantities.models import Time
 
 
 # Repository root (…/SPM-002)
@@ -28,19 +30,11 @@ class SpectrometerConfig(PrimitiveSerde):
     rides inside ConfigureBuffer.
     """
     device_index: int = 0
-    exposure_ms: float = 50.0
+    exposure_time: Time = Time(50, Prefix.MILLI)
     average: int = 5
     dark_subtraction: int = 0  # 0 = off, 1 = on
     mode: int = 0              # 0 = continuous mode
     scan_delay: int = 0        # used only in certain trigger modes
 
-    # ----- PrimitiveSerde (wire) -----
-
-    def to_primitive(self) -> Primitive:
-        return asdict(self)
-
-    @classmethod
-    def from_primitive(cls, v: Primitive) -> "SpectrometerConfig":
-        return cls(**{k: v[k] for k in cls.__dataclass_fields__ if k in v})
 
 

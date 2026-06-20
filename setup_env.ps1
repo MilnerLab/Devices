@@ -103,12 +103,12 @@ if ($script:OnWindows) {
         $env:PYTHON32_PATH = $python32Exe
         Write-Host "PYTHON32_PATH set to '$python32Exe'."
     } else {
-        Write-Warning "'py' launcher not found — skipping .venv32 (install Python 3.13 32-bit + py launcher)."
+        Write-Warning "'py' launcher not found -- skipping .venv32 (install Python 3.13 32-bit + py launcher)."
     }
 } else {
     # On Linux the SPM-002 DLL cannot be loaded, but the subprocess can still run.
     # Use the system 64-bit Python for the .venv32 environment.
-    Write-Host "(Linux: using 64-bit Python for .venv32 — DLL loading is skipped on Linux)"
+    Write-Host "(Linux: using 64-bit Python for .venv32 -- DLL loading is skipped on Linux)"
     $py32 = Resolve-Python -WinSpec $python64Spec
     $python32Exe = Setup-Venv -VenvPath $venv32Path -PyRunner $py32 -RequirementsFile $requirements32File
 }

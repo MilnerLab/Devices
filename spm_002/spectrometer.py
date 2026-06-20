@@ -3,6 +3,7 @@ import time
 from typing import Optional, List
 import ctypes as ct
 
+from base_core.quantities.enums import Prefix
 from spm_002.config import SpectrometerConfig
 from spm_002.exceptions import SpectrometerError
 from spm_002.dll import lib, c_int, c_ushort
@@ -156,7 +157,7 @@ class Spectrometer:
         cfg = self.config
 
         # Exposure time
-        if lib.PHO_SetTime(self.device_index, float(cfg.exposure_ms)) == 0:
+        if lib.PHO_SetTime(self.device_index, cfg.exposure_time.value(Prefix.MILLI)) == 0:
             raise SpectrometerError("PHO_SetTime failed.")
 
         # Averaging
