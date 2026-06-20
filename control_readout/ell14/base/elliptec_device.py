@@ -1,13 +1,21 @@
 from __future__ import annotations
 
 import time
-from enum import Enum, IntEnum
-from typing import Iterable, List, Optional
+from typing import List, Optional
 
 from serial import EIGHTBITS, PARITY_NONE, STOPBITS_ONE, Serial
-from control_readout.elliptec.base.enums import HomeDirection, HostCommand, ReplyCommand, StatusCode
-from control_readout.elliptec.base.exceptions import ElliptecError
-from control_readout.elliptec.base.helpers import _HEX_DIGITS, _encode_long32, _encode_u8_percent, _iter_addresses, _normalize_address, _parse_position_reply, _parse_status_reply, _parse_velocity_reply
+from control_readout.ell14.base.enums import HomeDirection, HostCommand, ReplyCommand, StatusCode
+from control_readout.ell14.base.exceptions import ElliptecError
+from control_readout.ell14.base.helpers import (
+    _HEX_DIGITS,
+    _encode_long32,
+    _encode_u8_percent,
+    _iter_addresses,
+    _normalize_address,
+    _parse_position_reply,
+    _parse_status_reply,
+    _parse_velocity_reply,
+)
 
 POLL_INTERVAL = float(0.2)
 MAX_POLLS = int(400)
@@ -25,9 +33,7 @@ class ElliptecDevice:
     - While waiting, we ignore non-GS lines (e.g. PO, GV).
     """
 
-    def __init__(
-        self,
-    ) -> None:
+    def __init__(self) -> None:
         self._serial: Optional[Serial] = None
         self._address: Optional[str] = None
 
@@ -37,6 +43,7 @@ class ElliptecDevice:
             return self._serial
         else:
             raise ValueError("No open serial connection.")
+
     # --- lifecycle ---------------------------------------------------------
 
     def open(self, port: str, address: Optional[str] = None) -> None:
@@ -55,18 +62,18 @@ class ElliptecDevice:
             addrs = self._find_addresses()
             if not addrs:
                 raise ElliptecError(
-                    f"No Elliptec device found on {self._port} in address range."
+                    f"No Elliptec device found on {port} in address range."
                 )
             if len(addrs) > 1:
                 raise ElliptecError(
-                    f"Multiple Elliptec devices found on {self._pport}: {addrs}. Pass address=... to select one."
+                    f"Multiple Elliptec devices found on {port}: {addrs}. Pass address=... to select one."
                 )
             self._address = addrs[0]
 
         self._status: StatusCode = StatusCode.OK
-        
+
     def close(self) -> None:
-            self.serial.close()
+        self.serial.close()
 
     def __enter__(self) -> "ElliptecDevice":
         return self
@@ -97,48 +104,31 @@ class ElliptecDevice:
         time.sleep(0.05)
 
     def _read_one_status(self) -> Optional[StatusCode]:
-        """
-        Read lines until we either see a GS for our address or we hit serial timeout.
-        Returns:
-          - StatusCode if a GS line was seen
-          - None if nothing arrived / no GS line arrived during this read window
-        """
         t0 = time.monotonic()
-        # Try to read a few lines within one serial timeout window
         while time.monotonic() - t0 < float(self.serial.timeout or 0.5):
             line = self._readline()
             if line is None:
                 return None
             if len(line) >= 5 and line[0] == self._address and line[1:3] == ReplyCommand.STATUS.value:
                 st = _parse_status_reply(line, self._address)
-                # Treat mechanical timeout like busy for our control loop
                 self._status = StatusCode.BUSY if st == StatusCode.MECHANICAL_TIMEOUT else st
                 return st
-            # ignore other lines (PO/GV/etc.)
         return None
 
     def _wait_until_gs00(self) -> None:
-        """
-        Poll GS repeatedly until we receive GS00, or until max_polls is exceeded.
-        """
         for _ in range(MAX_POLLS):
             self._send_raw(f"{self._address}{HostCommand.GET_STATUS.value}")
             st = self._read_one_status()
             if st is None:
                 time.sleep(POLL_INTERVAL)
                 continue
-
             if st == StatusCode.OK:
                 self._status = StatusCode.OK
                 return
-
-            # Busy-like conditions: keep waiting
             if st in (StatusCode.BUSY, StatusCode.MECHANICAL_TIMEOUT):
                 self._status = StatusCode.BUSY
                 time.sleep(POLL_INTERVAL)
                 continue
-
-            # Any other status is a hard failure
             self._status = st
             raise ElliptecError(f"Device status error while waiting: {st.name}", status=st)
 
@@ -146,13 +136,8 @@ class ElliptecDevice:
         raise ElliptecError("Exceeded max GS polls without receiving GS00", status=self._status)
 
     def _send_and_wait_ok(self, cmd: str) -> None:
-        """
-        Send any command, then enforce the 'only proceed after GS00' policy.
-        """
-        # Clear stale replies, to avoid consuming an old GS00 immediately.
         self.serial.reset_input_buffer()
         self._status = StatusCode.BUSY
-
         self._send_raw(cmd)
         self._wait_until_gs00()
 
@@ -160,8 +145,6 @@ class ElliptecDevice:
 
     def _find_addresses(self) -> List[str]:
         found: List[str] = []
-
-        # Clear receiver state machine and stale bytes
         self.serial.write(b"\r")
         self.serial.flush()
         self.serial.reset_input_buffer()
@@ -174,7 +157,6 @@ class ElliptecDevice:
                     found.append(a)
             except Exception:
                 continue
-
         return found
 
     # --- public commands ---------------------------------------------------
@@ -212,7 +194,6 @@ class ElliptecDevice:
             if line is None:
                 continue
             if len(line) >= 11 and line[0] == self._address and line[1:3] == ReplyCommand.POSITION.value:
-                # If we can read position, device is idle
                 self._status = StatusCode.OK
                 return _parse_position_reply(line, self._address)
         raise ElliptecError("Timeout waiting for PO reply")
@@ -229,5 +210,4 @@ class ElliptecDevice:
         self._send_and_wait_ok(f"{self._address}{HostCommand.MOVE_ABSOLUTE.value}{payload}")
 
     def stop(self) -> None:
-        # stop is optional in firmware; if unsupported you'll get a non-OK status
         self._send_and_wait_ok(f"{self._address}{HostCommand.STOP.value}")

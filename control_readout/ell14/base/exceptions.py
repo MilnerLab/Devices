@@ -1,7 +1,6 @@
 from typing import Optional
 
-from control_readout.elliptec.base.enums import StatusCode
-
+from control_readout.ell14.base.enums import StatusCode
 
 
 class ElliptecError(RuntimeError):

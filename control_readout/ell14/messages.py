@@ -9,23 +9,22 @@ from base_core.math.models import Angle
 
 @register
 @dataclass(frozen=True)
-class Rotate(Request[OKReply]):
+class RotateELL14(Request[OKReply]):
     angle: Angle = None  # type: ignore[assignment]
 
 
 @register
 @dataclass(frozen=True)
-class HomeRotator(Request[OKReply]):
+class HomeELL14Rotator(Request[OKReply]):
     pass
 
 
 @register
 @dataclass(frozen=True)
-class RotatorMoved(Message):
+class CurrentELL14Position(Message):
     angle: Angle = None  # type: ignore[assignment]
-
 
 @register
 @dataclass(frozen=True)
-class RotatorHomed(Message):
+class RequestCurrentPosition(Request[CurrentELL14Position]):
     pass

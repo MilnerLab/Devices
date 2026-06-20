@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 from base_core.ipc.subprocess_main import BaseSubprocessMain
-from control_readout.elliptec.config import ELL14Config
-from control_readout.elliptec.ell14_worker import RotatorWorker
+from control_readout.ell14.ell14_worker import ELL14RotatorWorker
 from control_readout.esp_301.config import Esp301Config
 from control_readout.esp_301.esp_301_worker import Esp301Worker
 from control_readout.picomotor.config import PicomotorConfig
@@ -23,31 +22,10 @@ class ControlReadoutProcess(BaseSubprocessMain):
     """
 
     def setup(self) -> None:
-        self.register_worker(RotatorWorker(
+        self.register_worker(ELL14RotatorWorker(
             bus=self.bus,
             connector=self.connector,
-            config=ELL14Config(),
             port="COM3",
-        ))
-        self.register_worker(Esp301Worker(
-            bus=self.bus,
-            connector=self.connector,
-            config=Esp301Config(),
-        ))
-        self.register_worker(Rgv100blWorker(
-            bus=self.bus,
-            connector=self.connector,
-            config=Rgv100Config(),
-        ))
-        self.register_worker(PicomotorWorker(
-            bus=self.bus,
-            connector=self.connector,
-            config=PicomotorConfig(),
-        ))
-        self.register_worker(ServoShutterWorker(
-            bus=self.bus,
-            connector=self.connector,
-            config=ServoShutterConfig(),
         ))
 
 
