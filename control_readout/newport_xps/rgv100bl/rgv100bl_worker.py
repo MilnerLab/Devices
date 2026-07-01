@@ -2,10 +2,13 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
+from control_readout.newport_xps.controller import XPSController
+from control_readout.newport_xps.rgv100bl.messages import GetCurrentRGVAngle, HomeRGV, RGVAngleUpdate, RotateRGVTo
+from control_readout.newport_xps.rgv100bl.rgv_device import RGV
 from control_readout.rgv100bl.config import Rgv100Config
 from control_readout.rgv100bl.messages import HomeHwp, HwpAngleUpdate, RotateHwpTo
 
@@ -18,12 +21,6 @@ log = logging.getLogger(__name__)
 WORKER_ID = "rgv100bl"
 
 
-def _make_driver(config: Rgv100Config):
-    if config.mock:
-        from control_readout.rgv100bl.mock_driver import MockRgvRotator
-        return MockRgvRotator(config)
-    from control_readout.rgv100bl.xps_driver import XpsRgvRotator
-    return XpsRgvRotator(config)
 
 
 class Rgv100blWorker(ThreadedWorker):
@@ -31,28 +28,29 @@ class Rgv100blWorker(ThreadedWorker):
         self,
         bus: "EventBus",
         connector: "SubprocessPipelineConnector",
-        config: Rgv100Config,
+        controller: XPSController,
     ) -> None:
         super().__init__(WORKER_ID, bus, connector)
-        self._config = config
-        self._rotator = None
+        self._controller = controller
+        self._rotator: Optional[RGV] = None
 
     def _setup(self) -> None:
-        self._unsubs.append(self._bus.subscribe(RotateHwpTo, self._on_rotate))
-        self._unsubs.append(self._bus.subscribe(HomeHwp, self._on_home))
+        self._unsubs.append(self._bus.subscribe(RotateRGVTo, self._on_rotate))
+        self._unsubs.append(self._bus.subscribe(HomeRGV, self._on_home))
+        self._unsubs.append(self._bus.subscribe(GetCurrentRGVAngle, self._on_get_angle))
 
     def _start(self) -> None:
-        self._rotator = _make_driver(self._config)
-        self._rotator.open()
+        self._rotator = RGV("rot", group="Rot", controller=self._controller)
+        self._rotator.start()
 
     def _pause(self) -> None:
         if self._rotator is not None:
-            self._rotator.close()
-            self._rotator = None
+            self._rotator.abort()
 
     def _reset(self) -> None:
-        self._pause()
-        self._start()
+        if self._rotator is not None:
+            self._rotator.stop()
+            self._rotator = None
 
     @worker_thread
     def _on_rotate(self, msg: RotateHwpTo) -> None:
@@ -61,7 +59,7 @@ class Rgv100blWorker(ThreadedWorker):
             return
         try:
             self._rotator.rotate(msg.angle)
-            self._notify(HwpAngleUpdate(angle=self._rotator.current_angle))
+            self._notify(RGVAngleUpdate(angle=self._rotator.angle()))
             self._reply_ok(msg)
         except Exception as exc:
             log.exception("Rgv100blWorker: rotate failed")
@@ -74,8 +72,19 @@ class Rgv100blWorker(ThreadedWorker):
             return
         try:
             self._rotator.home()
-            self._notify(HwpAngleUpdate(angle=self._rotator.current_angle))
+            self._notify(RGVAngleUpdate(angle=self._rotator.angle()))
             self._reply_ok(msg)
         except Exception as exc:
             log.exception("Rgv100blWorker: home failed")
+            self._reply_error(msg, str(exc))
+
+    @worker_thread
+    def _on_get_angle(self, msg: GetCurrentRGVAngle) -> None:
+        if self._rotator is None:
+            self._reply_error(msg, "RGV100BL not started")
+            return
+        try:
+            self._reply(RGVAngleUpdate(angle=self._rotator.angle(), request_id=msg.id))
+        except Exception as exc:
+            log.exception("Rgv100blWorker: get angle failed")
             self._reply_error(msg, str(exc))

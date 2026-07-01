@@ -21,3 +21,4 @@ pythonnet==3.0.5
 scipy==1.16.3
 six==1.17.0
 uncertainties==3.2.3
+newportxps

@@ -10,17 +10,22 @@ from base_core.math.models import Angle
 
 @register
 @dataclass(frozen=True)
-class RotateHwpTo(Request[OKReply]):
+class RotateRGVTo(Request[OKReply]):
     angle: Angle = None  # type: ignore[assignment]
 
 
 @register
 @dataclass(frozen=True)
-class HomeHwp(Request[OKReply]):
+class HomeRGV(Request[OKReply]):
     pass
 
 
 @register
 @dataclass(frozen=True)
-class HwpAngleUpdate(Message):
+class RGVAngleUpdate(Message):
     angle: Angle = None  # type: ignore[assignment]
+
+@register
+@dataclass(frozen=True)
+class GetCurrentRGVAngle(Request[RGVAngleUpdate]):
+    pass 

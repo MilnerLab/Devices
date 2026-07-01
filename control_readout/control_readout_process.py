@@ -4,10 +4,10 @@ from base_core.ipc.subprocess_main import BaseSubprocessMain
 from control_readout.ell14.ell14_worker import ELL14RotatorWorker
 from control_readout.esp_301.config import Esp301Config
 from control_readout.esp_301.esp_301_worker import Esp301Worker
+from control_readout.newport_xps.controller import XPSController
+from control_readout.newport_xps.rgv100bl.rgv100bl_worker import Rgv100blWorker
 from control_readout.picomotor.config import PicomotorConfig
 from control_readout.picomotor.picomotor_worker import PicomotorWorker
-from control_readout.rgv100bl.config import Rgv100Config
-from control_readout.rgv100bl.rgv100bl_worker import Rgv100blWorker
 from control_readout.servo_shutter.config import ServoShutterConfig
 from control_readout.servo_shutter.servo_shutter_worker import ServoShutterWorker
 
@@ -22,11 +22,20 @@ class ControlReadoutProcess(BaseSubprocessMain):
     """
 
     def setup(self) -> None:
+        
+        xps_controller = XPSController('10.1.137.137', username='PyControl', password='labview2python')
+        xps_controller.connect()
+        
         self.register_worker(ELL14RotatorWorker(
             bus=self.bus,
             connector=self.connector,
             port="COM3",
         ))
+        
+        self.register_worker(Rgv100blWorker(
+            self.bus,
+            self.connector,
+            xps_controller))
 
 
 if __name__ == "__main__":
