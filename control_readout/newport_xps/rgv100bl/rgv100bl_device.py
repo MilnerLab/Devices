@@ -2,14 +2,17 @@ from typing import Optional
 
 from base_core.math.enums import AngleUnit
 from base_core.math.models import Angle
+from control_readout.base.device import Device
 from control_readout.newport_xps.controller import XPSController
-from control_readout.newport_xps.device import XPSDevice
 
 
-class RGV(XPSDevice):
+class RGV(Device):
     """A rotary positioner such as the Newport RGV100BL (units: degrees).
 
-    Adds rotary conveniences on top of the base Device.
+    An XPS axis is addressed by a *group* and a *positioner* within it; for a
+    single-axis stage the positioner is conventionally "<group>.Pos", the default
+    if you don't pass `positioner`. This fixes the framework `Device` address to
+    that ``(group, positioner)`` pair and adds rotary conveniences.
     """
 
     units = "deg"
@@ -21,17 +24,22 @@ class RGV(XPSDevice):
         controller: XPSController,
         positioner: Optional[str] = None,
     ) -> None:
-        """
-        Parameters
-        ----------
-        wrap : if True, `move_to` targets are normalised into [0, 360).
-               Leave False for a point-to-point group with ±168° limits;
-               set True only for a continuously-rotating (Spindle) setup.
-        """
-        super().__init__(name, group, controller, positioner)
+        self.group = group
+        self.positioner = positioner or f"{group}.Pos"
+        super().__init__(name, address=(self.group, self.positioner), controller=controller)
+
+    @property
+    def _xps(self) -> "NewportXPS":  # noqa: F821 - runtime type from newportxps
+        """The raw NewportXPS handle, for stage-specific low-level commands."""
+        return self.controller.xps  # type: ignore[attr-defined]
+
+    def set_velocity(self, velocity: float, acceleration: Optional[float] = None) -> None:
+        """Set max velocity (and optionally acceleration) for subsequent moves."""
+        with self._lock:
+            self.controller.set_velocity(self.address, velocity, acceleration)  # type: ignore[attr-defined]
 
     def rotate(self, angle: Angle) -> None:
-        super().move_to(angle.Deg)
+        self.move_to(angle.Deg)
 
     def angle(self) -> Angle:
         """Alias for position(), reads in degrees."""
@@ -55,3 +63,9 @@ class RGV(XPSDevice):
                 "Continuous spin requires a SpindleAxis group; wire this to your "
                 "controller's GroupSpinParametersSet command. See the XPS manual."
             )
+
+    def __repr__(self) -> str:
+        return (
+            f"{type(self).__name__}(name={self.name!r}, group={self.group!r}, "
+            f"positioner={self.positioner!r})"
+        )

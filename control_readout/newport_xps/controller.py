@@ -1,39 +1,42 @@
 
 from __future__ import annotations
 
-import threading
-from abc import ABC
-from typing import Dict, Optional
+from typing import Optional, Tuple
+
+from control_readout.base.controller import Controller, ControllerError
 
 try:
     from newportxps import NewportXPS
 except ImportError:  # keep the module importable for inspection without hardware
     NewportXPS = None
 
+#: Device address on an XPS: (group, positioner). ``initialize``/``home``/``stop``
+#: act on the group; ``move``/``position``/``set_velocity`` act on the positioner.
+XPSAddress = Tuple[str, str]
 
-class XPSError(Exception):
-    """Raised for connection or device errors inside this wrapper."""
 
-class XPSController:
-    """Owns the connection to an XPS controller and a registry of devices.
- 
+class XPSError(ControllerError):
+    """Raised for connection or device errors specific to the XPS."""
+
+
+class XPSController(Controller):
+    """Owns the network connection to a Newport XPS controller and a registry of
+    devices. It knows nothing about whether a device is rotary, linear, etc.
+
+    The addressed device ``address`` for this controller is a ``(group,
+    positioner)`` pair (see :data:`XPSAddress`).
+
     Example
     -------
+    >>> from control_readout.newport_xps.rgv100bl.rgv100bl_device import RGV
     >>> ctrl = XPSController("192.168.0.254", password="Administrator")
-    >>> rot = ctrl.add_device(RotationStage("rot", group="Rot"))
+    >>> rot = ctrl.add_device(RGV("rot", group="Rot", controller=ctrl))
     >>> ctrl.connect()
     >>> rot.home()
-    >>> rot.move_to(90.0)
+    >>> rot.rotate(Angle(90, AngleUnit.DEG))
     >>> ctrl.disconnect()
- 
-    Or as a context manager (connects on enter, disconnects on exit):
- 
-    >>> with XPSController("192.168.0.254") as ctrl:
-    ...     rot = ctrl.add_device(RotationStage("rot", group="Rot"))
-    ...     rot.home()
-    ...     rot.move_to(90.0)
     """
- 
+
     def __init__(
         self,
         host: str,
@@ -42,117 +45,95 @@ class XPSController:
         port: int = 5001,
         timeout: float = 10.0,
     ) -> None:
+        super().__init__()
         self.host = host
         self.username = username
         self.password = password
         self.port = port
         self.timeout = timeout
- 
         self._xps: Optional["NewportXPS"] = None
-        self._devices: Dict[str, "Device"] = {}
-        # Serialize hardware access; moves on one connection shouldn't interleave.
-        self._lock = threading.RLock()
- 
-    # -- connection ------------------------------------------------------- #
-    @property
-    def connected(self) -> bool:
-        return self._xps is not None
- 
+
+    # -- transport -------------------------------------------------------- #
+    def _open(self) -> None:
+        if NewportXPS is None:
+            raise XPSError("newportxps is not installed. Run: pip install newportxps")
+        self._xps = NewportXPS(
+            self.host,
+            username=self.username,
+            password=self.password,
+            port=self.port,
+            timeout=self.timeout,
+        )
+
+    def _close(self) -> None:
+        if self._xps is not None:
+            try:
+                self._xps.disconnect()
+            finally:
+                self._xps = None
+
     @property
     def xps(self) -> "NewportXPS":
         """The underlying NewportXPS object (raises if not connected)."""
         if self._xps is None:
             raise XPSError("Controller is not connected. Call connect() first.")
         return self._xps
- 
-    def connect(self) -> "XPSController":
-        if NewportXPS is None:
-            raise XPSError(
-                "newportxps is not installed. Run: pip install newportxps"
-            )
-        if self._xps is None:
-            self._xps = NewportXPS(
-                self.host,
-                username=self.username,
-                password=self.password,
-                port=self.port,
-                timeout=self.timeout,
-            )
-        return self
- 
-    def disconnect(self) -> None:
-        if self._xps is not None:
-            try:
-                self._xps.disconnect()
-            finally:
-                self._xps = None
- 
-    # -- device registry -------------------------------------------------- #
-    def add_device(self, device: "Device") -> "Device":
-        """Register (attach) a device and bind it to this controller.
- 
-        Normally you don't call this directly — a device attaches itself via
-        device.start(). Returns the device. No-op if it's already registered
-        under the same name.
-        """
-        existing = self._devices.get(device.name)
-        if existing is device:
-            return device
-        if existing is not None:
-            raise XPSError(f"A different device named {device.name!r} is already registered.")
-        device._bind(self)
-        self._devices[device.name] = device
-        return device
- 
-    def remove_device(self, device) -> Optional["Device"]:
-        """Unregister (detach) a device from this controller.
- 
-        Accepts either the device's name or the Device instance, and drops it
-        from the registry. The device keeps its reference to this controller,
-        so it can re-attach later via device.start(). Returns the removed
-        device, or None if it wasn't registered.
- 
-        Note: this is Python-side bookkeeping only; it does not stop or power
-        down hardware. Call device.abort() first if a move is in progress.
-        """
-        name = device.name if isinstance(device, Device) else device
-        dev = self._devices.pop(name, None)
-        return dev
- 
-    @property
-    def devices(self) -> Dict[str, "Device"]:
-        return dict(self._devices)
- 
-    def __getitem__(self, name: str) -> "Device":
-        try:
-            return self._devices[name]
-        except KeyError:
-            raise KeyError(f"No device named {name!r} registered.") from None
- 
+
+    # -- addressed motion primitives (Controller interface) --------------- #
+    @staticmethod
+    def _split(address: XPSAddress) -> XPSAddress:
+        group, positioner = address
+        return group, positioner
+
+    def initialize(self, address: XPSAddress) -> None:
+        """Power on / initialize the group. Required once after power-up."""
+        group, _ = self._split(address)
+        self.xps.initialize_group(group)
+
+    def home(self, address: XPSAddress) -> None:
+        """Run the home search. Required after initialize, before any move."""
+        group, _ = self._split(address)
+        self.xps.home_group(group)
+
+    def get_position(self, address: XPSAddress) -> float:
+        _, positioner = self._split(address)
+        return self.xps.get_stage_position(positioner)
+
+    def move_absolute(self, address: XPSAddress, value: float) -> None:
+        _, positioner = self._split(address)
+        self.xps.move_stage(positioner, value, relative=False)
+
+    def move_relative(self, address: XPSAddress, delta: float) -> None:
+        _, positioner = self._split(address)
+        self.xps.move_stage(positioner, delta, relative=True)
+
+    def set_velocity(
+        self, address: XPSAddress, velocity: float, acceleration: Optional[float] = None
+    ) -> None:
+        """Set max velocity (and optionally acceleration) for subsequent moves."""
+        _, positioner = self._split(address)
+        self.xps.set_velocity(positioner, velo=velocity, accel=acceleration)
+
+    def stop(self, address: XPSAddress) -> None:
+        """Abort motion on this device's group (does not disconnect)."""
+        group, _ = self._split(address)
+        # abort_group exists on newportxps; fall back to a group restart if not.
+        abort = getattr(self.xps, "abort_group", None)
+        if callable(abort):
+            abort(group)
+        else:
+            self.xps.initialize_group(group)
+
     # -- convenience ------------------------------------------------------ #
-    def initialize_all(self) -> None:
-        """Initialize + home every registered device (typical power-up sequence)."""
-        for dev in self._devices.values():
-            dev.initialize()
-            dev.home()
- 
     def status(self) -> str:
         """Human-readable status of the whole controller (groups + stages)."""
         return self.xps.status_report()
- 
+
     def hardware_stages(self) -> dict:
         """Raw dict of stages the XPS knows about, from its system.ini.
         Useful for discovering the exact group/positioner names to use."""
         return self.xps.stages
- 
-    # -- context manager -------------------------------------------------- #
-    def __enter__(self) -> "XPSController":
-        return self.connect()
- 
-    def __exit__(self, exc_type, exc, tb) -> None:
-        self.disconnect()
- 
+
     def __repr__(self) -> str:
         state = "connected" if self.connected else "disconnected"
         return f"XPSController(host={self.host!r}, {state}, devices={list(self._devices)})"
- 

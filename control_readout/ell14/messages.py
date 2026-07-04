@@ -23,8 +23,3 @@ class HomeELL14Rotator(Request[OKReply]):
 @dataclass(frozen=True)
 class CurrentELL14Position(Message):
     angle: Angle = None  # type: ignore[assignment]
-
-@register
-@dataclass(frozen=True)
-class RequestCurrentPosition(Request[CurrentELL14Position]):
-    pass

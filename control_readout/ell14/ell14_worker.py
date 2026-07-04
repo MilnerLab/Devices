@@ -4,8 +4,9 @@ import logging
 from typing import TYPE_CHECKING
 
 from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
+from control_readout.ell14.controller import ElliptecController
 from control_readout.ell14.config import ELL14Config
-from control_readout.ell14.ell14_driver import ELL14Rotator
+from control_readout.ell14.device import ELL14Rotator
 from control_readout.ell14.messages import CurrentELL14Position, HomeELL14Rotator, RotateELL14
 
 if TYPE_CHECKING:
@@ -27,6 +28,7 @@ class ELL14RotatorWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._config = ELL14Config()
         self._port = port
+        self._controller: ElliptecController | None = None
         self._rotator: ELL14Rotator | None = None
         self._is_paused = False
 
@@ -35,9 +37,13 @@ class ELL14RotatorWorker(ThreadedWorker):
         self._unsubs.append(self._bus.subscribe(HomeELL14Rotator, self._on_home))
 
     def _start(self) -> None:
+        if self._controller is None:
+            self._controller = ElliptecController(self._port)
+            self._controller.connect()
         if self._rotator is None:
-            self._rotator = ELL14Rotator(self._config)
-            self._rotator.open(self._port)
+            address = self._controller.resolve_address()
+            self._rotator = ELL14Rotator("rotator", address, self._controller, self._config)
+            self._rotator.start()
             self._rotator.apply_config()
         self._is_paused = False
 
@@ -46,9 +52,12 @@ class ELL14RotatorWorker(ThreadedWorker):
 
     def _reset(self) -> None:
         if self._rotator is not None:
-            self._rotator.close()
+            self._rotator.stop()
             self._rotator = None
-            self._is_paused = False
+        if self._controller is not None:
+            self._controller.disconnect()
+            self._controller = None
+        self._is_paused = False
 
     @worker_thread
     def _on_rotate(self, msg: RotateELL14) -> None:

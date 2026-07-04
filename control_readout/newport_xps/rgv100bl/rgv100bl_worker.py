@@ -7,8 +7,14 @@ from typing import TYPE_CHECKING, Optional
 from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.newport_xps.controller import XPSController
-from control_readout.newport_xps.rgv100bl.messages import GetCurrentRGVAngle, HomeRGV, RGVAngleUpdate, RotateRGVTo
-from control_readout.newport_xps.rgv100bl.rgv_device import RGV
+from control_readout.newport_xps.rgv100bl.messages import (
+    GetCurrentRGVAngle,
+    HomeRGV,
+    RGVAngleReply,
+    RGVAngleUpdate,
+    RotateRGVTo,
+)
+from control_readout.newport_xps.rgv100bl.rgv100bl_device import RGV
 from control_readout.rgv100bl.config import Rgv100Config
 from control_readout.rgv100bl.messages import HomeHwp, HwpAngleUpdate, RotateHwpTo
 
@@ -84,7 +90,7 @@ class Rgv100blWorker(ThreadedWorker):
             self._reply_error(msg, "RGV100BL not started")
             return
         try:
-            self._reply(RGVAngleUpdate(angle=self._rotator.angle(), request_id=msg.id))
+            self._reply(RGVAngleReply(angle=self._rotator.angle(), request_id=msg.id))
         except Exception as exc:
             log.exception("Rgv100blWorker: get angle failed")
             self._reply_error(msg, str(exc))
