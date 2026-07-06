@@ -15,8 +15,6 @@ from control_readout.newport_xps.rgv100bl.messages import (
     RotateRGVTo,
 )
 from control_readout.newport_xps.rgv100bl.rgv100bl_device import RGV
-from control_readout.rgv100bl.config import Rgv100Config
-from control_readout.rgv100bl.messages import HomeHwp, HwpAngleUpdate, RotateHwpTo
 
 if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
@@ -59,7 +57,7 @@ class Rgv100blWorker(ThreadedWorker):
             self._rotator = None
 
     @worker_thread
-    def _on_rotate(self, msg: RotateHwpTo) -> None:
+    def _on_rotate(self, msg: RotateRGVTo) -> None:
         if self._rotator is None:
             self._reply_error(msg, "RGV100BL not started")
             return
