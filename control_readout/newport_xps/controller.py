@@ -85,6 +85,16 @@ class XPSController(Controller):
         group, positioner = address
         return group, positioner
 
+    def kill(self, address: XPSAddress) -> None:
+        """Kill (de-energise) the group, returning it to the NOTINIT state.
+
+        The XPS refuses to initialize a group that is already initialized and
+        will raise a driver fault. Killing first guarantees the clean NOTINIT
+        state that ``initialize`` expects, so it's safe to call before every
+        ``initialize``."""
+        group, _ = self._split(address)
+        self.xps.kill_group(group)
+
     def initialize(self, address: XPSAddress) -> None:
         """Power on / initialize the group. Required once after power-up."""
         group, _ = self._split(address)

@@ -25,13 +25,30 @@ class RGV(Device):
         positioner: Optional[str] = None,
     ) -> None:
         self.group = group
-        self.positioner = positioner or f"{group}.Pos"
+        # XPS stage keys are the full "Group.Positioner" name. Accept a bare
+        # positioner ("POSITIONER") or the default ("Pos") and prefix the group
+        # so we always address the stage the way move_stage() looks it up.
+        positioner = positioner or "Pos"
+        if "." not in positioner:
+            positioner = f"{group}.{positioner}"
+        self.positioner = positioner
         super().__init__(name, address=(self.group, self.positioner), controller=controller)
 
     @property
     def _xps(self) -> "NewportXPS":  # noqa: F821 - runtime type from newportxps
         """The raw NewportXPS handle, for stage-specific low-level commands."""
         return self.controller.xps  # type: ignore[attr-defined]
+
+    def initialize(self) -> None:
+        """Kill the group first, then initialize it.
+
+        On the RGV, issuing ``GroupInitialize`` against a group that is already
+        initialized raises a driver fault. Killing the group back to NOTINIT
+        first makes initialization idempotent and fault-free.
+        """
+        with self._lock:
+            self.controller.kill(self.address)  # type: ignore[attr-defined]
+            self.controller.initialize(self.address)
 
     def set_velocity(self, velocity: float, acceleration: Optional[float] = None) -> None:
         """Set max velocity (and optionally acceleration) for subsequent moves."""
