@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, Optional
 
 from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
+from base_core.math.models import Angle
 from control_readout.newport_xps.controller import XPSController
 from control_readout.newport_xps.rgv100bl.messages import (
     GetCurrentRGVAngle,
@@ -45,8 +46,10 @@ class Rgv100blWorker(ThreadedWorker):
 
     def _start(self) -> None:
         if self._rotator is None:
-            self._rotator = RGV("rot", group="Rot", controller=self._controller)
+            self._rotator = RGV("rot", group="GROUP1", controller=self._controller,positioner="POSITIONER")
             self._rotator.start()
+            self._rotator.initialize()
+            self._rotator.rotate(Angle(90))
 
     def _pause(self) -> None:
         if self._rotator is not None:
