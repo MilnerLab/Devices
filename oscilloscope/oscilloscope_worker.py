@@ -66,16 +66,18 @@ class OscilloscopeWorker(WriterWorker[ScopeBuffer]):
             handle.wait(timeout=5.0)
             if not handle.done_event.is_set():
                 log.warning("OscilloscopeWorker: acquisition did not stop in 5 s")
+
+    def _resume(self) -> None:
+        self._start_producing(self._acquire_producer, on_item=self._on_acquired)
+
+    def _stop(self) -> None:
+        self._pause()
         if self._scope is not None:
             try:
                 self._scope.close()
             except Exception:
                 log.exception("OscilloscopeWorker: error closing device")
             self._scope = None
-
-    def _reset(self) -> None:
-        self._pause()
-        self._start()
 
     @worker_thread
     def _on_set_config(self, msg: SetScopeConfig) -> None:

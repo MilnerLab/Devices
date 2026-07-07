@@ -44,14 +44,19 @@ class Uts150ccWorker(ThreadedWorker):
         self._unsubs.append(self._bus.subscribe(GetCurrentPosUTS150CC, self._on_get_pos))
 
     def _start(self) -> None:
-        self._stage = UTS150CC("uts150cc", axis=AXIS, controller=self._controller)
-        self._stage.start()
+        if self._stage is None:
+            self._stage = UTS150CC("uts150cc", axis=AXIS, controller=self._controller)
+            self._stage.start()
 
     def _pause(self) -> None:
         if self._stage is not None:
             self._stage.abort()
 
-    def _reset(self) -> None:
+    def _resume(self) -> None:
+        if self._stage is None:
+            self._start()
+
+    def _stop(self) -> None:
         if self._stage is not None:
             self._stage.stop()
             self._stage = None

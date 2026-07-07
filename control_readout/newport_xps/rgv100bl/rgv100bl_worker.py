@@ -44,14 +44,19 @@ class Rgv100blWorker(ThreadedWorker):
         self._unsubs.append(self._bus.subscribe(GetCurrentRGVAngle, self._on_get_angle))
 
     def _start(self) -> None:
-        self._rotator = RGV("rot", group="Rot", controller=self._controller)
-        self._rotator.start()
+        if self._rotator is None:
+            self._rotator = RGV("rot", group="Rot", controller=self._controller)
+            self._rotator.start()
 
     def _pause(self) -> None:
         if self._rotator is not None:
             self._rotator.abort()
 
-    def _reset(self) -> None:
+    def _resume(self) -> None:
+        if self._rotator is None:
+            self._start()
+
+    def _stop(self) -> None:
         if self._rotator is not None:
             self._rotator.stop()
             self._rotator = None

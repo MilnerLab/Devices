@@ -36,27 +36,33 @@ class PicomotorWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._config = config
         self._driver = None
+        self._is_paused = False
 
     def _setup(self) -> None:
         self._unsubs.append(self._bus.subscribe(StepBy, self._on_step_by))
 
     def _start(self) -> None:
-        self._driver = _make_driver(self._config)
-        self._driver.open()
+        if self._driver is None:
+            self._driver = _make_driver(self._config)
+            self._driver.open()
+        self._is_paused = False
 
     def _pause(self) -> None:
+        self._is_paused = True
+
+    def _resume(self) -> None:
+        self._is_paused = False
+
+    def _stop(self) -> None:
         if self._driver is not None:
             self._driver.close()
             self._driver = None
-
-    def _reset(self) -> None:
-        self._pause()
-        self._start()
+        self._is_paused = False
 
     @worker_thread
     def _on_step_by(self, msg: StepBy) -> None:
-        if self._driver is None:
-            self._reply_error(msg, "Picomotor not started")
+        if self._driver is None or self._is_paused:
+            self._reply_error(msg, "Picomotor not started or paused")
             return
         try:
             self._driver.move_by(msg.axis, msg.steps)

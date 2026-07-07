@@ -34,23 +34,29 @@ class ServoShutterWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._config = config
         self._driver = None
+        self._is_paused = False
 
     def _setup(self) -> None:
         self._unsubs.append(self._bus.subscribe(BlockArm, self._on_block))
         self._unsubs.append(self._bus.subscribe(UnblockArm, self._on_unblock))
 
     def _start(self) -> None:
-        self._driver = _make_driver(self._config)
-        self._driver.open()
+        if self._driver is None:
+            self._driver = _make_driver(self._config)
+            self._driver.open()
+        self._is_paused = False
 
     def _pause(self) -> None:
+        self._is_paused = True
+
+    def _resume(self) -> None:
+        self._is_paused = False
+
+    def _stop(self) -> None:
         if self._driver is not None:
             self._driver.close()
             self._driver = None
-
-    def _reset(self) -> None:
-        self._pause()
-        self._start()
+        self._is_paused = False
 
     @worker_thread
     def _on_block(self, msg: BlockArm) -> None:
@@ -61,8 +67,8 @@ class ServoShutterWorker(ThreadedWorker):
         self._set(msg, msg.arm, blocked=False)
 
     def _set(self, msg, arm: int, *, blocked: bool) -> None:
-        if self._driver is None:
-            self._reply_error(msg, "Servo shutter not started")
+        if self._driver is None or self._is_paused:
+            self._reply_error(msg, "Servo shutter not started or paused")
             return
         try:
             (self._driver.block if blocked else self._driver.unblock)(arm)

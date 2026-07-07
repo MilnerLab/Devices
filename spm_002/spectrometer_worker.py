@@ -25,8 +25,9 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
     Runs the acquisition loop inside the spectrometer subprocess.
 
     On StartWorker: opens the hardware, applies config, starts the acquisition stream.
-    On PauseWorker:  drains the stream, closes the hardware.
-    On ResetWorker: stop + start.
+    On PauseWorker: drains the stream, closes nothing (device stays open).
+    On ResumeWorker: restarts the acquisition stream (device stays open).
+    On StopWorker: closes the hardware.
     On SetSpectrometerConfig: applies new settings (live while running or buffered for next start).
     """
 
@@ -61,9 +62,12 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
             handle.wait(timeout=5.0)
             if not handle.done_event.is_set():
                 log.warning("SpectrometerWorker: acquisition did not stop in 5 s")
-        
 
-    def _reset(self) -> None:
+    def _resume(self) -> None:
+        self._start_producing(self._acquire_producer, on_item=self._on_acquired)
+        log.debug("SpectrometerWorker: resumed acquisition")
+
+    def _stop(self) -> None:
         if self._spectrometer is not None:
             try:
                 self._spectrometer.close()

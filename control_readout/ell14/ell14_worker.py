@@ -50,7 +50,10 @@ class ELL14RotatorWorker(ThreadedWorker):
     def _pause(self) -> None:
         self._is_paused = True
 
-    def _reset(self) -> None:
+    def _resume(self) -> None:
+        self._is_paused = False
+
+    def _stop(self) -> None:
         if self._rotator is not None:
             self._rotator.stop()
             self._rotator = None
