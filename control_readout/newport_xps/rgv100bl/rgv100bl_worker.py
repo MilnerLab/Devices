@@ -50,7 +50,6 @@ class Rgv100blWorker(ThreadedWorker):
             self._rotator.start()
             self._rotator.initialize()
             self._rotator.home()  # required after initialize before any move (else XPS error -22)
-            self._rotator.rotate(Angle(90))
 
     def _pause(self) -> None:
         if self._rotator is not None:
