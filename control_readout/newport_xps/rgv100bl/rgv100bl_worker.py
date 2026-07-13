@@ -13,6 +13,7 @@ from control_readout.newport_xps.rgv100bl.messages import (
     HomeRGV,
     RGVAngleReply,
     RGVAngleUpdate,
+    RotateRGVBy,
     RotateRGVTo,
 )
 from control_readout.newport_xps.rgv100bl.rgv100bl_device import RGV
@@ -41,6 +42,7 @@ class Rgv100blWorker(ThreadedWorker):
 
     def _setup(self) -> None:
         self._unsubs.append(self._bus.subscribe(RotateRGVTo, self._on_rotate))
+        self._unsubs.append(self._bus.subscribe(RotateRGVBy, self._on_rotate_by))
         self._unsubs.append(self._bus.subscribe(HomeRGV, self._on_home))
         self._unsubs.append(self._bus.subscribe(GetCurrentRGVAngle, self._on_get_angle))
 
@@ -87,6 +89,28 @@ class Rgv100blWorker(ThreadedWorker):
             self._reply_ok(msg)
         except Exception as exc:
             log.exception("Rgv100blWorker: rotate failed")
+            self._reply_error(msg, str(exc))
+
+    @worker_thread
+    def _on_rotate_by(self, msg: RotateRGVBy) -> None:
+        if self._rotator is None:
+            log.warning("Rgv100blWorker: RotateRGVBy received but rotator not started — ignoring")
+            self._reply_error(msg, "RGV100BL not started")
+            return
+        try:
+            before = self._rotator.angle().Deg
+            # Relative move: nudge the plate BY msg.angle from where it is now.
+            log.info(
+                "Rgv100blWorker: rotate by (relative) %.4f deg [current %.4f deg]",
+                msg.angle.Deg, before,
+            )
+            self._rotator.move_by(msg.angle.Deg)
+            after = self._rotator.angle().Deg
+            log.info("Rgv100blWorker: rotate complete: %.4f -> %.4f deg", before, after)
+            self._notify(RGVAngleUpdate(angle=self._rotator.angle()))
+            self._reply_ok(msg)
+        except Exception as exc:
+            log.exception("Rgv100blWorker: rotate_by failed")
             self._reply_error(msg, str(exc))
 
     @worker_thread
