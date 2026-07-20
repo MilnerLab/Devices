@@ -24,7 +24,12 @@ from control_readout.servo_shutter.servo_shutter_worker import ServoShutterWorke
 log = logging.getLogger(__name__)
 
 XPS_HOST = "10.1.137.137"
-ESP301_PORT = "COM4"  # TODO: confirm real COM port
+#: Newport ESP301, all three linear stages, over USB. Verified live 2026-07-19:
+#: this is a TI-3410 USB bridge fixed at 921600 baud, *not* the front-panel
+#: RS-232 port. There is no COM14 on this machine (defect G1).
+ESP301_PORT = "COM7"
+
+#: Thorlabs ELL14 half-wave-plate rotator, on a MosChip PCI serial port.
 ELL14_PORT = "COM3"
 
 #: How long to wait for a controller's IO lock before giving up on closing its port.

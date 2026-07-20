@@ -28,10 +28,18 @@ class ESP301Controller(Controller):
     carriage return (e.g. ``1PA10.0`` moves axis 1 to 10 mm). The addressed
     device ``address`` for this controller is the integer axis number.
 
+    Baud rate depends on the transport, and the two differ by a lot:
+
+    - **USB** (the default here): the ESP301 enumerates through a TI 3410
+      bridge as a virtual COM port running at **921600** baud. This is fixed
+      and is *not* the front-panel setting.
+    - **RS-232**: use whatever the front panel is configured for, typically
+      19200 — pass ``baud=19200`` explicitly.
+
     Example
     -------
     >>> from control_readout.base.device import Device
-    >>> ctrl = ESP301Controller("COM3")
+    >>> ctrl = ESP301Controller("COM7")  # USB; defaults to 921600 baud
     >>> stage = ctrl.add_device(Device("x", address=1, controller=ctrl))
     >>> ctrl.connect()
     >>> stage.initialize()
@@ -43,7 +51,7 @@ class ESP301Controller(Controller):
     def __init__(
         self,
         port: str,
-        baud: int = 19200,
+        baud: int = 921600,
         timeout: float = 5.0,
     ) -> None:
         super().__init__()
