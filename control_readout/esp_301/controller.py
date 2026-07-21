@@ -87,8 +87,18 @@ class ESP301Controller(Controller):
             self.serial.write((command + "\r").encode("ascii"))
 
     def _query(self, command: str) -> str:
-        """Send a command and return the controller's single-line reply."""
+        """Send a command and return the controller's single-line reply.
+
+        Resyncs first: ``reset_input_buffer()`` discards any stale bytes still in
+        the OS buffer before the command goes out, so a late or dropped reply from a
+        *previous* command can never be read as this one's. Without it, one late
+        ``MD?`` reply under fast polling desynced the write/readline stream for the
+        rest of the session — the root cause of the G19 "dead controller" misdiagnosis.
+        An empty return is a genuine no-reply (read timeout), which callers in the
+        motion path treat as a communication fault rather than a value.
+        """
         with self._lock:
+            self.serial.reset_input_buffer()
             self.serial.write((command + "\r").encode("ascii"))
             return self.serial.readline().decode("ascii").strip()
 
@@ -147,13 +157,70 @@ class ESP301Controller(Controller):
         self._write(f"{address}ST")
 
     def motion_done(self, address: int) -> bool:
-        """True once the axis has finished moving (``MD?`` returns 1)."""
-        return self._query(f"{address}MD?").strip().startswith("1")
+        """True once the axis has finished moving (``MD?`` returns 1).
 
-    def wait_for_motion(self, address: int, poll: float = 0.05, timeout: float = 120.0) -> None:
-        """Block until the axis reports motion done, or raise on timeout."""
+        Raises :class:`ESP301Error` on an *empty* reply — a read timeout with no
+        data. Previously ``''.startswith("1")`` was just ``False``, so "the
+        controller said nothing" was indistinguishable from "still moving" (defect
+        G20) and a dead link read as a stuck axis. Making it a distinct fault lets
+        :meth:`wait_for_motion` fail fast instead of spinning the full timeout.
+        """
+        reply = self._query(f"{address}MD?").strip()
+        if not reply:
+            raise ESP301Error(f"no reply to MD? on axis {address} (controller not answering)")
+        return reply.startswith("1")
+
+    def _read_error_code(self) -> str:
+        """Best-effort ``TE?`` for a fault diagnostic. Never raises."""
+        try:
+            code = self._query("TE?").strip()
+            return code or "no-reply"
+        except (ESP301Error, ValueError, OSError):
+            return "unavailable"
+
+    def wait_for_motion(
+        self,
+        address: int,
+        poll: float = 0.1,
+        timeout: float = 120.0,
+        settle: float = 0.08,
+        max_comm_retries: int = 3,
+    ) -> None:
+        """Block until the axis reports motion done, or raise.
+
+        Two distinct failure modes, kept distinct:
+
+        * **Stuck axis** — the controller keeps answering ``0`` past ``timeout``.
+          Raises the classic timeout.
+        * **Comms fault** — the controller stops answering ``MD?``. After
+          ``max_comm_retries`` empty reads it fails *fast* (seconds, not 120 s) with
+          the ``TE?`` error code, rather than blaming the axis (G20/A13).
+
+        ``settle`` gives the controller a beat to finish parsing the ``PA``/``PR``/
+        ``OR`` command before the first ``MD?``, so the first poll can't collide with
+        it. ``poll`` defaults to 10 Hz — 20 Hz was above the ASCII parser's safe
+        ceiling behind the TI-3410 USB bridge and was what provoked the desync.
+        """
+        time.sleep(settle)
         deadline = time.monotonic() + timeout
-        while not self.motion_done(address):
+        comm_failures = 0
+        while True:
+            try:
+                done = self.motion_done(address)
+            except ESP301Error:
+                comm_failures += 1
+                if comm_failures > max_comm_retries:
+                    te = self._read_error_code()
+                    raise ESP301Error(
+                        f"Axis {address}: controller stopped answering MD? after "
+                        f"{max_comm_retries} retries — communication fault, not a stuck "
+                        f"stage (TE?={te}). Check the COM7 link, not the mechanics."
+                    )
+                time.sleep(poll)
+                continue
+            comm_failures = 0
+            if done:
+                return
             if time.monotonic() > deadline:
                 raise ESP301Error(f"Timed out waiting for axis {address} to stop moving.")
             time.sleep(poll)

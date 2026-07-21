@@ -105,6 +105,27 @@ during a scan.
 - **Do not** run against real hardware while an experiment holds COM7. A live check
   (`TP` read) is only valid once the port is free, and belongs to the operator, not CI.
 
+## Implementation log (2026-07-21, operator session — authorised for hardware/e2e)
+
+Test-first, updated as the work lands.
+
+**Test:** `test_esp301_resync.py` (repo root, plain script + fake serial, no pytest;
+run with `App_Apps/.venv`). Three cases, encoding the post-fix contract:
+`resync_recovers_from_stale_backlog`, `no_reply_fails_fast_as_comms_fault`,
+`happy_path_move_completes_and_sends_pa`.
+
+- **[RED] unpatched driver — 1/3 passed** (as designed): stale-backlog case times out
+  (no `reset_input_buffer`); silent-controller case spins the full timeout and raises
+  "axis stuck" (G20); happy-path passes. This is the offline reproduction of the 03:14
+  desync.
+- **[GREEN] mock test — 3/3.** Fix landed in `control_readout/esp_301/controller.py`:
+  (1) `_query` calls `reset_input_buffer()` before every write; (2) `motion_done`
+  raises on an empty read (no longer confused with "still moving"); (3)
+  `wait_for_motion` settles ~80 ms after the move command, polls at 10 Hz, and on
+  repeated empty reads fails fast with the `TE?` code instead of a 120 s "stuck axis".
+- [ ] **[GREEN] hardware e2e** — the XCORR short run completes end-to-end once the fix is
+  merged into `xcorr/devices` (the live editable install).
+
 ## Merge path
 
 `fix/esp301-serial-resync` → `xcorr/devices`. Ordinary merge; no squash concern here (this
