@@ -123,8 +123,91 @@ run with `App_Apps/.venv`). Three cases, encoding the post-fix contract:
   raises on an empty read (no longer confused with "still moving"); (3)
   `wait_for_motion` settles ~80 ms after the move command, polls at 10 Hz, and on
   repeated empty reads fails fast with the `TE?` code instead of a 120 s "stuck axis".
-- [ ] **[GREEN] hardware e2e** — the XCORR short run completes end-to-end once the fix is
-  merged into `xcorr/devices` (the live editable install).
+- **[PARTIAL] hardware e2e (2026-07-21 00:11, fix merged to `xcorr/devices`).** The new
+  code path ran on real hardware and behaved correctly, but the scan did not complete:
+  - Fix confirmed live: the first grating move (axis 3) now fails via the *comms-fault*
+    path with the fast, accurate message above at **~27 s**, not the old silent 124 s
+    "stuck axis". Resync is reading true replies (real "0"s then real silence, no stale
+    backlog).
+  - **Underlying axis-3 fault, independent of the framing desync:** after a fresh
+    connection the controller answered `MD?`="0" (moving) for ~27 s, then went fully
+    silent — MD? *and* TE? both no-reply. The resync cannot cure a controller that stops
+    responding mid-move; that is a link/hardware condition for the operator to inspect
+    (front panel, cabling, the UTS150CC grating axis), or a USB re-enumeration to clear a
+    bridge wedge left by an *earlier* unpatched desync. Do **not** conclude "dead
+    controller" (that was the original G19 misdiagnosis) — it answered healthily for 27 s.
+  - Open question to resolve on hardware: whether a large grating move legitimately runs
+    >27 s and the fault is a transient gap at move-completion that a slightly more
+    tolerant retry window (e.g. ~2 s of silence before declaring a fault, still ≪120 s)
+    would ride through. Needs an operator-supervised axis-3 probe before tuning.
+
+### Isolation post-mortem (2026-07-21 ~02:50, laser off, no XCORR stack)
+
+Drove COM7 directly with the fixed driver (`scratchpad/esp301_diag.py`,
+`esp301_raw.py`, `esp301_unwedge.py`). Findings:
+
+- **The link is fully wedged, not just axis 3.** Every command on every axis
+  (`TP`/`MD?`/`TE?`/`VE?`) returns `''` after the full serial timeout — the controller
+  sends zero bytes. Front panel + manual motion still work (operator-confirmed), so the
+  CPU is alive; the **USB serial channel is wedged**, exactly the failure mode this branch
+  is about. It has stayed wedged since the 00:11 dropout.
+- **The resync fix is NOT the cause.** Raw pyserial with *no* `reset_input_buffer` is
+  equally silent, so the wedge is independent of the fix. This also settles the open
+  question above: the 00:11 failure was a full link wedge, **not** a transient
+  move-completion gap — so the fast-fail threshold is correct and needs no tuning.
+- **No software un-wedge worked:** DTR/RTS toggle, serial break, lone-CR flush,
+  close/reopen — all still silent. PnP disable/enable to force USB re-enumeration failed
+  ("Generic failure" — needs admin; session is not elevated).
+
+**DEFERRED — operator action required (30 s) to clear the wedge:**
+1. Physically unplug the ESP301 USB and replug it (or power-cycle the controller), **or**
+2. From an **elevated** PowerShell:
+   `Disable-PnpDevice -InstanceId 'USB\VID_104D&PID_3001\0000000000000000' -Confirm:$false`
+   then `Enable-PnpDevice -InstanceId 'USB\VID_104D&PID_3001\0000000000000000' -Confirm:$false`.
+   Verify with `scratchpad/esp301_raw.py` — `1TP` should return a number, not `b''`.
+
+**The real prevention question** *(RESOLVED 2026-07-21 — see "Trigger isolated" below)*:
+the 00:11 run wedged *with the fix active*, and the original 03:14 incident wedged the
+old 20 Hz code. The common factor was hypothesised to be **sustained fast `MD?` polling
+during a multi-second move**. The test-to-failure sweep below overturned that: poll rate
+and move duration are *not* the trigger — writing without draining replies is.
+
+### Trigger isolated + `_write` prevention (2026-07-21, test-to-failure sweep)
+
+A controlled sweep pinned the wedge to a single cause. Each hypothesis ran against the
+live bridge until it either survived or wedged (full log: `Docs/XCORR_WEDGE_TESTING_20260721.md`):
+
+| Test | Pattern | Result |
+|------|---------|--------|
+| H1 | idle ~79 Hz, reading replies | survived (~7,100 polls) |
+| H2 | idle ~21 Hz + per-write `reset_input_buffer`, reading | survived (~1,900) |
+| H3 | **write-flood, NOT draining replies** | **WEDGED — the trigger** |
+| H4 | 10 Hz through 70 s moves, reading | survived (~500/move) |
+| Soak | 15 min continuous, reading | survived, 6,276 polls, 0 empties |
+
+**Conclusion.** The wedge is caused by the host **writing without draining replies** —
+nothing else. Not poll rate (H1 at 79 Hz survived), not move duration (H4), not the
+resync's per-write buffer purge (H2 survived — clears the earlier "reset churn" worry),
+and no cumulative drift (15 min soak clean). The 00:11 wedge is explained as leftover
+old-driver damage on a bridge that was never re-enumerated, not a fresh fast-poll wedge.
+
+**The prevention, in code.** The resync discipline is *strict one-write-one-read*, and it
+had one hole: `_query` drained before every write, but `_write` (the write-only path:
+`MO`/`MF`/`OR`/`PA`/`PR`/`VA`/`ST`) was fire-and-forget. A burst of write-only commands
+with no interleaved query — bring-up (`MO`×3), velocity setup, a stop broadcast — was an
+undrained-write burst: exactly H3. Fix: **`_write` now `reset_input_buffer()`s before the
+write, symmetric with `_query`**, so every command drains the bridge one-for-one and no
+undrained bytes can accumulate. Proven safe at rate by H2. An `INVARIANT` comment on the
+low-level IO section records that all port access must go through `_write`/`_query` — a
+naked `serial.write()` elsewhere reopens the trigger.
+
+- **[GREEN] mock test — 4/4.** New `test_write_flood_drains_on_every_write` fires 5
+  consecutive write-only commands and asserts one buffer drain per write
+  (`reset_count == 5`); fails on the old fire-and-forget `_write`. The three prior resync
+  cases still pass. Run with `App_Apps/.venv`.
+- **[DEFERRED] hardware re-validation** — a write-burst soak (`MO`/`VA`/`ST` with no
+  interleaved query) against the live controller, once the probe is free. The mock test +
+  H2's proven-safe per-write reset cover the design until then.
 
 ## Merge path
 
