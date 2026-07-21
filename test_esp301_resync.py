@@ -117,6 +117,27 @@ def test_no_reply_fails_fast_as_comms_fault():
     raise AssertionError("expected an ESP301Error comms fault, nothing was raised")
 
 
+def test_write_flood_drains_on_every_write():
+    """FM-2 / H3 guard: a burst of write-only commands must drain on every write.
+
+    The TI-3410 bridge wedges when the host writes without ever reading (the H3
+    write-flood, isolated as the sole trigger). The fix makes ``_write`` resync like
+    ``_query``, so no undrained bytes can accumulate across a burst. Fire a run of
+    naked writes — ``MO``/``VA``/``ST``/``MF``, none of which trigger a follow-up
+    query — and assert each one reset the input buffer: one drain per write, no gaps.
+    On the old fire-and-forget ``_write`` this fails (``reset_count == 0``).
+    """
+    fake = FakeESP301Serial()
+    ctrl = _wired(fake)
+    ctrl.initialize(1)        # 1MO
+    ctrl.initialize(2)        # 2MO
+    ctrl.set_velocity(3, 20)  # 3VA20.0000
+    ctrl.stop(1)              # 1ST
+    ctrl.motor_off(2)         # 2MF
+    assert fake.reset_count == 5, f"want one drain per write, got {fake.reset_count}"
+    assert len(fake.written) == 5, fake.written
+
+
 def test_happy_path_move_completes_and_sends_pa():
     """Regression guard: a normal move still sends PA and completes cleanly."""
     fake = FakeESP301Serial(md_replies=["0", "0", "1"])

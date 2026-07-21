@@ -81,9 +81,26 @@ class ESP301Controller(Controller):
         return self._serial
 
     # -- low-level IO ----------------------------------------------------- #
+    # INVARIANT: every byte to/from the port goes through _write or _query,
+    # both under self._lock and both resyncing (reset_input_buffer) before the
+    # write. Nothing else may touch self.serial directly. This one-write-one-
+    # drain discipline is what keeps the TI-3410 USB bridge from wedging (FM-2);
+    # a naked serial.write() elsewhere reopens the write-flood trigger.
     def _write(self, command: str) -> None:
-        """Send a command (carriage-return terminated) with no reply expected."""
+        """Send a write-only command (carriage-return terminated); no reply expected.
+
+        Resyncs first, exactly like :meth:`_query`: ``reset_input_buffer()`` before
+        the write drains any bytes still sitting in the OS / bridge buffer. ESP301
+        write commands (``MO``/``MF``/``OR``/``PA``/``PR``/``VA``/``ST``) produce no
+        reply, so a *burst* of them through the old fire-and-forget path let bytes
+        pile up undrained behind the TI-3410 USB bridge — the write-flood condition
+        that wedged it (FM-2, isolated as the sole trigger by the H3 test). Draining
+        on every write keeps the bridge's read path exercised one-for-one and closes
+        that trigger at the single IO chokepoint. Proven safe at rate by H2
+        (per-write ``reset_input_buffer`` survived with no delta vs. no-reset).
+        """
         with self._lock:
+            self.serial.reset_input_buffer()
             self.serial.write((command + "\r").encode("ascii"))
 
     def _query(self, command: str) -> str:
