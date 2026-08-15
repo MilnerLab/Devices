@@ -1,12 +1,10 @@
 """RGV100BL rotation worker (HWP) — command-style, notifies angle after each move."""
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Optional
 
-from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
-
 from base_core.math.models import Angle
+from control_readout.base.motorized_worker import MotorizedWorker
 from control_readout.newport_xps.controller import XPSController
 from control_readout.newport_xps.rgv100bl.messages import (
     GetCurrentRGVAngle,
@@ -21,14 +19,14 @@ if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 
-log = logging.getLogger(__name__)
-
 WORKER_ID = "rgv100bl"
 
 
+class Rgv100blWorker(MotorizedWorker):
+    MOVE_MSG = RotateRGVTo
+    HOME_MSG = HomeRGV
+    GET_POS_MSG = GetCurrentRGVAngle
 
-
-class Rgv100blWorker(ThreadedWorker):
     def __init__(
         self,
         bus: "EventBus",
@@ -38,11 +36,6 @@ class Rgv100blWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._controller = controller
         self._rotator: Optional[RGV] = None
-
-    def _setup(self) -> None:
-        self._unsubs.append(self._bus.subscribe(RotateRGVTo, self._on_rotate))
-        self._unsubs.append(self._bus.subscribe(HomeRGV, self._on_home))
-        self._unsubs.append(self._bus.subscribe(GetCurrentRGVAngle, self._on_get_angle))
 
     def _start(self) -> None:
         if self._rotator is None:
@@ -64,39 +57,26 @@ class Rgv100blWorker(ThreadedWorker):
             self._rotator.stop()
             self._rotator = None
 
-    @worker_thread
-    def _on_rotate(self, msg: RotateRGVTo) -> None:
-        if self._rotator is None:
-            self._reply_error(msg, "RGV100BL not started")
-            return
-        try:
-            self._rotator.rotate(msg.angle)
-            self._notify(RGVAngleUpdate(angle=self._rotator.angle()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("Rgv100blWorker: rotate failed")
-            self._reply_error(msg, str(exc))
+    def _ready(self) -> bool:
+        return self._rotator is not None
 
-    @worker_thread
-    def _on_home(self, msg: HomeHwp) -> None:
-        if self._rotator is None:
-            self._reply_error(msg, "RGV100BL not started")
-            return
-        try:
-            self._rotator.home()
-            self._notify(RGVAngleUpdate(angle=self._rotator.angle()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("Rgv100blWorker: home failed")
-            self._reply_error(msg, str(exc))
+    def _not_ready_msg(self) -> str:
+        return "RGV100BL not started"
 
-    @worker_thread
-    def _on_get_angle(self, msg: GetCurrentRGVAngle) -> None:
-        if self._rotator is None:
-            self._reply_error(msg, "RGV100BL not started")
-            return
-        try:
-            self._reply(RGVAngleReply(angle=self._rotator.angle(), request_id=msg.id))
-        except Exception as exc:
-            log.exception("Rgv100blWorker: get angle failed")
-            self._reply_error(msg, str(exc))
+    def _move_value(self, msg: RotateRGVTo) -> Angle:
+        return msg.angle
+
+    def _do_move(self, value: Angle) -> None:
+        self._rotator.rotate(value)
+
+    def _do_home(self) -> None:
+        self._rotator.home()
+
+    def _read_value(self) -> Angle:
+        return self._rotator.angle()
+
+    def _pos_update_msg(self, value: Angle) -> RGVAngleUpdate:
+        return RGVAngleUpdate(angle=value)
+
+    def _pos_reply_msg(self, value: Angle, request_id: str) -> RGVAngleReply:
+        return RGVAngleReply(angle=value, request_id=request_id)

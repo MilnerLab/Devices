@@ -1,10 +1,7 @@
 """FMS300PP linear-stage worker — command-style, notifies position after each move."""
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Optional
-
-from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.esp_301.controller import ESP301Controller
 from control_readout.esp_301.fms300pp.fms300pp_device import FMS300PP
@@ -15,19 +12,22 @@ from control_readout.esp_301.fms300pp.messages import (
     HomeFMS300PP,
     MoveFMS300PPTo,
 )
+from control_readout.base.motorized_worker import MotorizedWorker
 
 if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
-
-log = logging.getLogger(__name__)
 
 WORKER_ID = "fms300pp"
 #: 1-based ESP301 axis this stage is wired to. Adjust to match the hardware.
 AXIS = 1
 
 
-class Fms300ppWorker(ThreadedWorker):
+class Fms300ppWorker(MotorizedWorker):
+    MOVE_MSG = MoveFMS300PPTo
+    HOME_MSG = HomeFMS300PP
+    GET_POS_MSG = GetCurrentPosFMS300PP
+
     def __init__(
         self,
         bus: "EventBus",
@@ -37,11 +37,6 @@ class Fms300ppWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._controller = controller
         self._stage: Optional[FMS300PP] = None
-
-    def _setup(self) -> None:
-        self._unsubs.append(self._bus.subscribe(MoveFMS300PPTo, self._on_move))
-        self._unsubs.append(self._bus.subscribe(HomeFMS300PP, self._on_home))
-        self._unsubs.append(self._bus.subscribe(GetCurrentPosFMS300PP, self._on_get_pos))
 
     def _start(self) -> None:
         if self._stage is None:
@@ -61,39 +56,26 @@ class Fms300ppWorker(ThreadedWorker):
             self._stage.stop()
             self._stage = None
 
-    @worker_thread
-    def _on_move(self, msg: MoveFMS300PPTo) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "FMS300PP not started")
-            return
-        try:
-            self._stage.move_to(msg.position)
-            self._notify(FMS300PPPosUpdate(position=self._stage.position()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("Fms300ppWorker: move failed")
-            self._reply_error(msg, str(exc))
+    def _ready(self) -> bool:
+        return self._stage is not None
 
-    @worker_thread
-    def _on_home(self, msg: HomeFMS300PP) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "FMS300PP not started")
-            return
-        try:
-            self._stage.home()
-            self._notify(FMS300PPPosUpdate(position=self._stage.position()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("Fms300ppWorker: home failed")
-            self._reply_error(msg, str(exc))
+    def _not_ready_msg(self) -> str:
+        return "FMS300PP not started"
 
-    @worker_thread
-    def _on_get_pos(self, msg: GetCurrentPosFMS300PP) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "FMS300PP not started")
-            return
-        try:
-            self._reply(FMS300PPPosReply(position=self._stage.position(), request_id=msg.id))
-        except Exception as exc:
-            log.exception("Fms300ppWorker: get position failed")
-            self._reply_error(msg, str(exc))
+    def _move_value(self, msg: MoveFMS300PPTo) -> float:
+        return msg.position
+
+    def _do_move(self, value: float) -> None:
+        self._stage.move_to(value)
+
+    def _do_home(self) -> None:
+        self._stage.home()
+
+    def _read_value(self) -> float:
+        return self._stage.position()
+
+    def _pos_update_msg(self, value: float) -> FMS300PPPosUpdate:
+        return FMS300PPPosUpdate(position=value)
+
+    def _pos_reply_msg(self, value: float, request_id: str) -> FMS300PPPosReply:
+        return FMS300PPPosReply(position=value, request_id=request_id)

@@ -1,24 +1,32 @@
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING
 
-from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
+from base_core.math.models import Angle
 from control_readout.ell14.controller import ElliptecController
 from control_readout.ell14.config import ELL14Config
 from control_readout.ell14.device import ELL14Rotator
-from control_readout.ell14.messages import CurrentELL14Position, HomeELL14Rotator, RotateELL14
+from control_readout.ell14.messages import (
+    CurrentELL14Position,
+    ELL14PositionReply,
+    GetCurrentELL14Position,
+    HomeELL14Rotator,
+    RotateELL14,
+)
+from control_readout.base.motorized_worker import MotorizedWorker
 
 if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 
-log = logging.getLogger(__name__)
-
 WORKER_ID = "rotator"
 
 
-class ELL14RotatorWorker(ThreadedWorker):
+class ELL14RotatorWorker(MotorizedWorker):
+    MOVE_MSG = RotateELL14
+    HOME_MSG = HomeELL14Rotator
+    GET_POS_MSG = GetCurrentELL14Position
+
     def __init__(
         self,
         bus: EventBus,
@@ -31,10 +39,6 @@ class ELL14RotatorWorker(ThreadedWorker):
         self._controller: ElliptecController | None = None
         self._rotator: ELL14Rotator | None = None
         self._is_paused = False
-
-    def _setup(self) -> None:
-        self._unsubs.append(self._bus.subscribe(RotateELL14, self._on_rotate))
-        self._unsubs.append(self._bus.subscribe(HomeELL14Rotator, self._on_home))
 
     def _start(self) -> None:
         if self._controller is None:
@@ -62,27 +66,26 @@ class ELL14RotatorWorker(ThreadedWorker):
             self._controller = None
         self._is_paused = False
 
-    @worker_thread
-    def _on_rotate(self, msg: RotateELL14) -> None:
-        if self._rotator is None or self._is_paused:
-            self._reply_error(msg, "Rotator not started or paused!")
-            return
-        try:
-            self._rotator.rotate(msg.angle)
-            self._notify(CurrentELL14Position(angle=self._rotator.current_angle))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("RotatorWorker: rotate failed")
-            self._reply_error(msg, str(exc))
+    def _ready(self) -> bool:
+        return self._rotator is not None and not self._is_paused
 
-    @worker_thread
-    def _on_home(self, msg: HomeELL14Rotator) -> None:
-        if self._rotator is None or self._is_paused:
-            self._reply_error(msg, "Rotator not started or paused!")
-            return
-        try:
-            self._rotator.home()
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("RotatorWorker: home failed")
-            self._reply_error(msg, str(exc))
+    def _not_ready_msg(self) -> str:
+        return "Rotator not started or paused!"
+
+    def _move_value(self, msg: RotateELL14) -> Angle:
+        return msg.angle
+
+    def _do_move(self, value: Angle) -> None:
+        self._rotator.rotate(value)
+
+    def _do_home(self) -> None:
+        self._rotator.home()
+
+    def _read_value(self) -> Angle:
+        return self._rotator.current_angle
+
+    def _pos_update_msg(self, value: Angle) -> CurrentELL14Position:
+        return CurrentELL14Position(angle=value)
+
+    def _pos_reply_msg(self, value: Angle, request_id: str) -> ELL14PositionReply:
+        return ELL14PositionReply(angle=value, request_id=request_id)

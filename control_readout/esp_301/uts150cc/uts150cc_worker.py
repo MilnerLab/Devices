@@ -1,10 +1,7 @@
 """UTS150CC linear-stage worker — command-style, notifies position after each move."""
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Optional
-
-from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.esp_301.controller import ESP301Controller
 from control_readout.esp_301.uts150cc.uts150cc_device import UTS150CC
@@ -15,19 +12,22 @@ from control_readout.esp_301.uts150cc.messages import (
     UTS150CCPosReply,
     UTS150CCPosUpdate,
 )
+from control_readout.base.motorized_worker import MotorizedWorker
 
 if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
-
-log = logging.getLogger(__name__)
 
 WORKER_ID = "uts150cc"
 #: 1-based ESP301 axis this stage is wired to. Adjust to match the hardware.
 AXIS = 3
 
 
-class Uts150ccWorker(ThreadedWorker):
+class Uts150ccWorker(MotorizedWorker):
+    MOVE_MSG = MoveUTS150CCTo
+    HOME_MSG = HomeUTS150CC
+    GET_POS_MSG = GetCurrentPosUTS150CC
+
     def __init__(
         self,
         bus: "EventBus",
@@ -37,11 +37,6 @@ class Uts150ccWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._controller = controller
         self._stage: Optional[UTS150CC] = None
-
-    def _setup(self) -> None:
-        self._unsubs.append(self._bus.subscribe(MoveUTS150CCTo, self._on_move))
-        self._unsubs.append(self._bus.subscribe(HomeUTS150CC, self._on_home))
-        self._unsubs.append(self._bus.subscribe(GetCurrentPosUTS150CC, self._on_get_pos))
 
     def _start(self) -> None:
         if self._stage is None:
@@ -61,39 +56,26 @@ class Uts150ccWorker(ThreadedWorker):
             self._stage.stop()
             self._stage = None
 
-    @worker_thread
-    def _on_move(self, msg: MoveUTS150CCTo) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "UTS150CC not started")
-            return
-        try:
-            self._stage.move_to(msg.position)
-            self._notify(UTS150CCPosUpdate(position=self._stage.position()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("Uts150ccWorker: move failed")
-            self._reply_error(msg, str(exc))
+    def _ready(self) -> bool:
+        return self._stage is not None
 
-    @worker_thread
-    def _on_home(self, msg: HomeUTS150CC) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "UTS150CC not started")
-            return
-        try:
-            self._stage.home()
-            self._notify(UTS150CCPosUpdate(position=self._stage.position()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("Uts150ccWorker: home failed")
-            self._reply_error(msg, str(exc))
+    def _not_ready_msg(self) -> str:
+        return "UTS150CC not started"
 
-    @worker_thread
-    def _on_get_pos(self, msg: GetCurrentPosUTS150CC) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "UTS150CC not started")
-            return
-        try:
-            self._reply(UTS150CCPosReply(position=self._stage.position(), request_id=msg.id))
-        except Exception as exc:
-            log.exception("Uts150ccWorker: get position failed")
-            self._reply_error(msg, str(exc))
+    def _move_value(self, msg: MoveUTS150CCTo) -> float:
+        return msg.position
+
+    def _do_move(self, value: float) -> None:
+        self._stage.move_to(value)
+
+    def _do_home(self) -> None:
+        self._stage.home()
+
+    def _read_value(self) -> float:
+        return self._stage.position()
+
+    def _pos_update_msg(self, value: float) -> UTS150CCPosUpdate:
+        return UTS150CCPosUpdate(position=value)
+
+    def _pos_reply_msg(self, value: float, request_id: str) -> UTS150CCPosReply:
+        return UTS150CCPosReply(position=value, request_id=request_id)

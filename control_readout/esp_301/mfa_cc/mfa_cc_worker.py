@@ -1,10 +1,7 @@
 """MFA-CC linear-stage worker — command-style, notifies position after each move."""
 from __future__ import annotations
 
-import logging
 from typing import TYPE_CHECKING, Optional
-
-from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.esp_301.controller import ESP301Controller
 from control_readout.esp_301.mfa_cc.mfa_cc_device import MFACC
@@ -15,19 +12,22 @@ from control_readout.esp_301.mfa_cc.messages import (
     MFACCPosUpdate,
     MoveMFACCTo,
 )
+from control_readout.base.motorized_worker import MotorizedWorker
 
 if TYPE_CHECKING:
     from base_core.framework.events.event_bus import EventBus
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
-
-log = logging.getLogger(__name__)
 
 WORKER_ID = "mfacc"
 #: 1-based ESP301 axis this stage is wired to. Adjust to match the hardware.
 AXIS = 2
 
 
-class MfaccWorker(ThreadedWorker):
+class MfaccWorker(MotorizedWorker):
+    MOVE_MSG = MoveMFACCTo
+    HOME_MSG = HomeMFACC
+    GET_POS_MSG = GetCurrentPosMFACC
+
     def __init__(
         self,
         bus: "EventBus",
@@ -37,11 +37,6 @@ class MfaccWorker(ThreadedWorker):
         super().__init__(WORKER_ID, bus, connector)
         self._controller = controller
         self._stage: Optional[MFACC] = None
-
-    def _setup(self) -> None:
-        self._unsubs.append(self._bus.subscribe(MoveMFACCTo, self._on_move))
-        self._unsubs.append(self._bus.subscribe(HomeMFACC, self._on_home))
-        self._unsubs.append(self._bus.subscribe(GetCurrentPosMFACC, self._on_get_pos))
 
     def _start(self) -> None:
         if self._stage is None:
@@ -61,39 +56,26 @@ class MfaccWorker(ThreadedWorker):
             self._stage.stop()
             self._stage = None
 
-    @worker_thread
-    def _on_move(self, msg: MoveMFACCTo) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "MFA-CC not started")
-            return
-        try:
-            self._stage.move_to(msg.position)
-            self._notify(MFACCPosUpdate(position=self._stage.position()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("MfaccWorker: move failed")
-            self._reply_error(msg, str(exc))
+    def _ready(self) -> bool:
+        return self._stage is not None
 
-    @worker_thread
-    def _on_home(self, msg: HomeMFACC) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "MFA-CC not started")
-            return
-        try:
-            self._stage.home()
-            self._notify(MFACCPosUpdate(position=self._stage.position()))
-            self._reply_ok(msg)
-        except Exception as exc:
-            log.exception("MfaccWorker: home failed")
-            self._reply_error(msg, str(exc))
+    def _not_ready_msg(self) -> str:
+        return "MFA-CC not started"
 
-    @worker_thread
-    def _on_get_pos(self, msg: GetCurrentPosMFACC) -> None:
-        if self._stage is None:
-            self._reply_error(msg, "MFA-CC not started")
-            return
-        try:
-            self._reply(MFACCPosReply(position=self._stage.position(), request_id=msg.id))
-        except Exception as exc:
-            log.exception("MfaccWorker: get position failed")
-            self._reply_error(msg, str(exc))
+    def _move_value(self, msg: MoveMFACCTo) -> float:
+        return msg.position
+
+    def _do_move(self, value: float) -> None:
+        self._stage.move_to(value)
+
+    def _do_home(self) -> None:
+        self._stage.home()
+
+    def _read_value(self) -> float:
+        return self._stage.position()
+
+    def _pos_update_msg(self, value: float) -> MFACCPosUpdate:
+        return MFACCPosUpdate(position=value)
+
+    def _pos_reply_msg(self, value: float, request_id: str) -> MFACCPosReply:
+        return MFACCPosReply(position=value, request_id=request_id)
