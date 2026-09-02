@@ -77,9 +77,11 @@ class RGV(Device):
         up and keeps turning until :meth:`stop_spin`. Nothing else may command a position
         while this is running.
 
-        Requires the group to be declared ``SpindleAxis`` in the XPS ``system.ini``. On a
-        SingleAxis group the controller rejects the command and this raises: correct, since
-        such a group has travel limits and "turn forever" cannot be honoured there.
+        Works whichever way the group is declared in the XPS ``system.ini``. A SpindleAxis
+        group spins natively; a SingleAxis one is spun by a very long move, which the
+        RGV100BL's +-165,000,000 degree travel limits make effectively continuous -- 63
+        hours at the ceiling below, ten days at the usual 0.5 rev/s. See
+        ``XPSController.spin`` for the mechanism and ``spin_headroom`` for what is left.
         """
         speed = float(velocity_deg_s)
         if abs(speed) > MAX_SPIN_DEG_S:
@@ -93,8 +95,11 @@ class RGV(Device):
     def stop_spin(self, acceleration: Optional[float] = None) -> None:
         """Ramp a spin down to a stop, leaving the group ready for ordinary moves.
 
-        Deliberately not ``abort()``: aborting a spinning direct-drive rotator stops it as
-        fast as the servo can, which is a shock load on whatever optic is mounted.
+        Deliberately not ``abort()``/``kill()``: those de-energise the group and leave it
+        needing a re-initialize before the next ordinary move. Both spin strategies stop
+        through the positioner's own deceleration profile instead -- measured at ~41
+        degrees of ramp-down from 180 deg/s -- so the optic is never stopped harder than
+        the stage was configured to stop it.
         """
         with self._lock:
             self.controller.stop_spin(self.address, acceleration)  # type: ignore[attr-defined]
