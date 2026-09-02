@@ -50,9 +50,26 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
 
     def _start(self) -> None:
         if self._spectrometer is None:
-            self._spectrometer = Spectrometer(self._config)
-            self._spectrometer.open()
-            self._spectrometer.apply_config()
+            # Built, opened and configured as ONE unit. If any step fails the object is
+            # thrown away and the device is closed, so a failed start leaves nothing behind.
+            #
+            # It used to be assigned first and configured after, so a rejected setting left
+            # a half-built Spectrometer parked on the worker: the next start saw a non-None
+            # _spectrometer, skipped open() and apply_config() entirely, and went straight to
+            # producing against a device that had never been configured. That is why a single
+            # bad exposure made the worker refuse to start until it was stopped -- the second
+            # failure was no longer about the setting at all.
+            spectrometer = Spectrometer(self._config)
+            try:
+                spectrometer.open()
+                spectrometer.apply_config()
+            except Exception:
+                try:
+                    spectrometer.close()
+                except Exception:
+                    log.exception("SpectrometerWorker: error closing after a failed start")
+                raise
+            self._spectrometer = spectrometer
         self._start_producing(self._acquire_producer, on_item=self._on_acquired)
         log.debug("SpectrometerWorker: started acquisition")
 

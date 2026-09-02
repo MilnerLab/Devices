@@ -155,22 +155,46 @@ class Spectrometer:
             self.open()
 
         cfg = self.config
+        if cfg is None:
+            # Reached when a worker is started before any config has arrived. Saying so is
+            # the whole point: the AttributeError this used to raise pointed at ctypes and
+            # told the operator nothing about which of the two things went wrong.
+            raise SpectrometerError(
+                "No configuration to apply -- the device was opened before any "
+                "SpectrometerConfig reached the worker."
+            )
+
+        exposure_ms = cfg.exposure_time.value(Prefix.MILLI)
+
+        # Every one of these reports the VALUE it was rejected with. The DLL returns a bare
+        # 0 for every kind of refusal, so without the value in the message an out-of-range
+        # setting is indistinguishable from a dead device -- and the operator, who has just
+        # typed a new number, has no way to tell which they are looking at.
 
         # Exposure time
-        if lib.PHO_SetTime(self.device_index, cfg.exposure_time.value(Prefix.MILLI)) == 0:
-            raise SpectrometerError("PHO_SetTime failed.")
+        if lib.PHO_SetTime(self.device_index, exposure_ms) == 0:
+            raise SpectrometerError(f"PHO_SetTime failed (exposure {exposure_ms:g} ms).")
 
-        # Averaging
+        # Averaging. Rejections here are frequently about the exposure, not the count: the
+        # device has to hold exposure x average worth of acquisition, so a count the device
+        # accepts at a short exposure is refused at a long one. Both numbers are quoted for
+        # that reason.
         if lib.PHO_SetAverage(self.device_index, int(cfg.average)) == 0:
-            raise SpectrometerError("PHO_SetAverage failed.")
+            raise SpectrometerError(
+                f"PHO_SetAverage failed (average {int(cfg.average)} at "
+                f"{exposure_ms:g} ms exposure, {exposure_ms * int(cfg.average):g} ms total)."
+            )
 
         # Dark subtraction
         if lib.PHO_SetDs(self.device_index, int(cfg.dark_subtraction)) == 0:
-            raise SpectrometerError("PHO_SetDs failed.")
+            raise SpectrometerError(
+                f"PHO_SetDs failed (dark_subtraction {int(cfg.dark_subtraction)}).")
 
         # Mode (0 = continuous)
         if lib.PHO_SetMode(self.device_index, int(cfg.mode), int(cfg.scan_delay)) == 0:
-            raise SpectrometerError("PHO_SetMode failed.")
+            raise SpectrometerError(
+                f"PHO_SetMode failed (mode {int(cfg.mode)}, "
+                f"scan_delay {int(cfg.scan_delay)}).")
 
     def configure(self, config: Optional[SpectrometerConfig] = None) -> None:
         """
