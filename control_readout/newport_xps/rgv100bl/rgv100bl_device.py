@@ -6,6 +6,10 @@ from control_readout.base.device import Device
 from control_readout.newport_xps.controller import XPSController
 
 
+#: Module-level alias of :attr:`RGV.MAX_SPIN_DEG_S`, for callers sizing a rate limit.
+MAX_SPIN_DEG_S = 720.0
+
+
 class RGV(Device):
     """A rotary positioner such as the Newport RGV100BL (units: degrees).
 
@@ -16,6 +20,10 @@ class RGV(Device):
     """
 
     units = "deg"
+
+    #: RGV100 series maximum angular velocity, deg/s (= 2 rev/s). Beyond this the
+    #: controller faults, so it is checked here where the number can carry its meaning.
+    MAX_SPIN_DEG_S = 720.0
 
     def __init__(
         self,
@@ -62,24 +70,40 @@ class RGV(Device):
         """Alias for position(), reads in degrees."""
         return Angle(self.position(), AngleUnit.DEG)
 
-    def spin(self, velocity_deg_s: float) -> None:
-        """Start continuous rotation at the given velocity.
+    def spin(self, velocity_deg_s: float, acceleration: Optional[float] = None) -> None:
+        """Start continuous rotation at ``velocity_deg_s`` deg/s. Sign sets the direction.
 
-        NOTE: this only works if the XPS group for this stage is configured as a
-        SpindleAxis (continuous rotation). For a standard SingleAxis group the
-        ±168° limit switches prevent endless rotation and you should use
-        move_to / move_by instead. The underlying Spindle command name can vary
-        by firmware generation, so verify against your controller's manual.
+        Returns as soon as the XPS has accepted the command -- the stage is still ramping
+        up and keeps turning until :meth:`stop_spin`. Nothing else may command a position
+        while this is running.
+
+        Requires the group to be declared ``SpindleAxis`` in the XPS ``system.ini``. On a
+        SingleAxis group the controller rejects the command and this raises: correct, since
+        such a group has travel limits and "turn forever" cannot be honoured there.
+        """
+        speed = float(velocity_deg_s)
+        if abs(speed) > MAX_SPIN_DEG_S:
+            raise ValueError(
+                f"{abs(speed):.1f} deg/s exceeds the RGV100's {MAX_SPIN_DEG_S:.0f} deg/s "
+                f"maximum ({MAX_SPIN_DEG_S / 360.0:.0f} rev/s)"
+            )
+        with self._lock:
+            self.controller.spin(self.address, speed, acceleration)  # type: ignore[attr-defined]
+
+    def stop_spin(self, acceleration: Optional[float] = None) -> None:
+        """Ramp a spin down to a stop, leaving the group ready for ordinary moves.
+
+        Deliberately not ``abort()``: aborting a spinning direct-drive rotator stops it as
+        fast as the servo can, which is a shock load on whatever optic is mounted.
         """
         with self._lock:
-            spin = getattr(self._xps, "set_velocity", None)
-            # On a Spindle group, a velocity move = continuous rotation.
-            # Many setups drive this via the raw command interface instead:
-            #   self._xps._xps.GroupSpinParametersSet(self._xps._sid, self.group, velocity, accel)
-            raise NotImplementedError(
-                "Continuous spin requires a SpindleAxis group; wire this to your "
-                "controller's GroupSpinParametersSet command. See the XPS manual."
-            )
+            self.controller.stop_spin(self.address, acceleration)  # type: ignore[attr-defined]
+
+    def spin_velocity(self) -> float:
+        """The stage's actual angular velocity in deg/s, read back from the controller."""
+        with self._lock:
+            velocity, _accel = self.controller.spin_current(self.address)  # type: ignore[attr-defined]
+        return velocity
 
     def __repr__(self) -> str:
         return (

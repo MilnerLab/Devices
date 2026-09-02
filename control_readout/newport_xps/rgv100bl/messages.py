@@ -39,3 +39,31 @@ class RGVAngleReply(Reply):
 class GetCurrentRGVAngle(Request[RGVAngleReply]):
     pass
 
+
+@register
+@dataclass(frozen=True)
+class SpinRGV(Request[OKReply]):
+    """Start (or re-rate) continuous rotation. Sign of the velocity sets the direction.
+
+    Sent again while already spinning, this changes the speed without stopping.
+    """
+    velocity_deg_s: float = 0.0
+
+
+@register
+@dataclass(frozen=True)
+class StopSpinRGV(Request[OKReply]):
+    """Ramp the spin down to a stop and report the angle it settled at."""
+    pass
+
+
+@register
+@dataclass(frozen=True)
+class RGVSpinStateUpdate(Message):
+    """Spontaneous push whenever the spin starts, changes rate or stops.
+
+    The angle read-back is deliberately NOT part of this: while spinning there is no
+    stable position to report. ``RGVAngleUpdate`` follows once the stage has stopped.
+    """
+    spinning: bool = False
+    velocity_deg_s: float = 0.0
