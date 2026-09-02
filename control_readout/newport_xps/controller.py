@@ -204,6 +204,22 @@ class XPSController(Controller):
         """Human-readable status of the whole controller (groups + stages)."""
         return self.xps.status_report()
 
+    def group_categories(self) -> dict:
+        """``{group_name: category}`` as declared in the XPS ``system.ini`` ``[GROUPS]``
+        section -- ``SingleAxis``, ``SpindleAxis``, ``XY`` and so on.
+
+        This is the authority on whether :meth:`spin` can work at all: continuous rotation
+        is only defined on a ``SpindleAxis`` group. The table is read over FTP as part of
+        connecting, so consulting it costs nothing and needs no extra round trip.
+        """
+        return {name: info.get("category", "?")
+                for name, info in (self.xps.groups or {}).items()}
+
+    def is_spindle(self, address: XPSAddress) -> bool:
+        """Whether the group behind ``address`` is declared a SpindleAxis."""
+        group, _ = self._split(address)
+        return self.group_categories().get(group, "").lower() == "spindleaxis"
+
     def hardware_stages(self) -> dict:
         """Raw dict of stages the XPS knows about, from its system.ini.
         Useful for discovering the exact group/positioner names to use."""
