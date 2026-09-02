@@ -43,10 +43,9 @@ class GetCurrentRGVAngle(Request[RGVAngleReply]):
 @register
 @dataclass(frozen=True)
 class SpinRGV(Request[OKReply]):
-    """Start, or re-rate, free-running rotation. The sign sets the direction.
+    """Start (or re-rate) continuous rotation. Sign of the velocity sets the direction.
 
-    Unlike every other command here this one has no destination: the plate turns
-    until something stops it. The OK only says the controller accepted the rate.
+    Sent again while already spinning, this changes the speed without stopping.
     """
     velocity_deg_s: float = 0.0
 
@@ -54,20 +53,17 @@ class SpinRGV(Request[OKReply]):
 @register
 @dataclass(frozen=True)
 class StopSpinRGV(Request[OKReply]):
-    """Ramp a free-running plate to a stop. The settled angle follows as an update."""
+    """Ramp the spin down to a stop and report the angle it settled at."""
     pass
 
 
 @register
 @dataclass(frozen=True)
 class RGVSpinStateUpdate(Message):
-    """Spontaneous spin-state push (no request_id).
+    """Spontaneous push whenever the spin starts, changes rate or stops.
 
-    The worker is the authority on whether the plate is turning, because it also ends
-    a spin on its own — a pause, a stop, or a position command arriving from anywhere.
-    Without this push the handle would go on believing a stopped plate is still
-    free-running, and keep discarding the angle read-backs it needs.
+    The angle read-back is deliberately NOT part of this: while spinning there is no
+    stable position to report. ``RGVAngleUpdate`` follows once the stage has stopped.
     """
     spinning: bool = False
     velocity_deg_s: float = 0.0
-

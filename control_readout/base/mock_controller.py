@@ -136,7 +136,8 @@ class MockXPSController(MockController):
     def kill(self, address: Any) -> None:
         self._initialized[address] = False
 
-    def spin(self, address: Any, velocity_deg_s: float) -> None:
+    def spin(self, address: Any, velocity_deg_s: float,
+             acceleration: Optional[float] = None) -> None:
         """Free-running rotation, tracked against the clock.
 
         Loud on purpose. The real XPS raises here unless its group is configured as a
@@ -148,8 +149,13 @@ class MockXPSController(MockController):
         self._spin[address] = (float(velocity_deg_s), self.get_position(address),
                                time.monotonic())
 
-    def stop_spin(self, address: Any) -> None:
+    def stop_spin(self, address: Any, acceleration: Optional[float] = None) -> None:
         self.stop(address)
+
+    def spin_current(self, address: Any) -> tuple[float, float]:
+        """(velocity, acceleration) as the real controller reports it; the mock ramps instantly."""
+        spin = self._spin.get(address)
+        return (spin[0] if spin else 0.0), 0.0
 
     def status(self) -> str:
         return "MockXPSController: no hardware"
