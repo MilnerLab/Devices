@@ -7,7 +7,8 @@ answers. Mirrors :class:`oscilloscope.mock_driver.MockScope` so the worker is
 driver-agnostic.
 
 SCPI flow per channel: set DATa source/encoding/range, read the WFMOutpre scaling
-preamble, ``CURVe?`` for the raw samples, then apply ``volts = (raw - YOFf)*YMUlt + YZEro``.
+preamble (including ``XINcr``, the sample interval the display's time axis is drawn
+from), ``CURVe?`` for the raw samples, then apply ``volts = (raw - YOFf)*YMUlt + YZEro``.
 """
 from __future__ import annotations
 
@@ -54,19 +55,27 @@ class TbsScope:
 
     def acquire_trace(self) -> ScopeTrace:
         d = self._require()
+        # Stamped before the trigger is armed: the stamp means "this capture began here",
+        # which is what a freshness gate can reason about. See ScopeTrace.timestamp_ns.
+        started_ns = time.time_ns()
         d.write("ACQuire:STATE RUN")
         d.query("*OPC?")  # wait for the sequence to complete
         rows = []
+        dt_s = 0.0
         for ch in range(1, self._config.channels + 1):
             d.write(f"DATa:SOUrce CH{ch}")
             ymult = float(d.query("WFMOutpre:YMUlt?"))
             yoff = float(d.query("WFMOutpre:YOFf?"))
             yzero = float(d.query("WFMOutpre:YZEro?"))
+            # Read per acquisition, not once at open: the horizontal scale is a physical
+            # knob an operator turns while the stream is running, and a time base cached
+            # at open would silently mislabel every trace after they did.
+            dt_s = float(d.query("WFMOutpre:XINcr?"))
             raw = d.query_binary_values("CURVe?", datatype="h", container=np.ndarray)
             volts = (raw.astype(np.float64) - yoff) * ymult + yzero
             rows.append(volts)
         samples = np.vstack(rows).astype(np.float64)
-        return ScopeTrace(samples=samples, timestamp_ns=time.time_ns())
+        return ScopeTrace(samples=samples, timestamp_ns=started_ns, dt_s=dt_s)
 
     def _require(self):
         if self._dev is None:

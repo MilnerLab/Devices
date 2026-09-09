@@ -19,17 +19,9 @@ from base_core.ipc.device_worker import DeviceWorkerMixin
 from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 from base_core.ipc.threaded_worker import worker_thread
 
-import numpy as np
-
 from oscilloscope.buffer import ScopeBuffer
 from oscilloscope.config import ScopeConfig
-from oscilloscope.messages import (
-    AcquirePoint,
-    AcquirePointReply,
-    AcquireTrace,
-    AcquireTraceReply,
-    SetScopeConfig,
-)
+from oscilloscope.messages import ScopeTimebase, SetScopeConfig
 
 log = logging.getLogger(__name__)
 
@@ -48,12 +40,12 @@ class OscilloscopeWorker(DeviceWorkerMixin, WriterWorker[ScopeBuffer]):
         self._config = config
         self._scope = None
         self._item_id = 0
+        #: Last sample interval reported to the main process. Only changes are sent.
+        self._dt_s = 0.0
 
     def _setup(self) -> None:
         super()._setup()  # registers SlotGrant subscription
         self._unsubs.append(self._bus.subscribe(SetScopeConfig, self._on_set_config))
-        self._unsubs.append(self._bus.subscribe(AcquirePoint, self._on_acquire_point))
-        self._unsubs.append(self._bus.subscribe(AcquireTrace, self._on_acquire_trace))
 
     def _start(self) -> None:
         if self._scope is not None:
@@ -93,6 +85,9 @@ class OscilloscopeWorker(DeviceWorkerMixin, WriterWorker[ScopeBuffer]):
 
     def _stop(self) -> None:
         self._pause()
+        # Forget the reported time base so the next start re-reports it: the main process
+        # may have been rebound to a fresh worker in between and know nothing.
+        self._dt_s = 0.0
         if self._scope is not None:
             try:
                 self._scope.close()
@@ -102,68 +97,20 @@ class OscilloscopeWorker(DeviceWorkerMixin, WriterWorker[ScopeBuffer]):
 
     @worker_thread
     def _on_set_config(self, msg: SetScopeConfig) -> None:
+        # spec.shape, not the ScopeMemorySpec accessors: AttachBuffer carries a plain
+        # MemorySpec over the pipe, so what the subprocess attached is the base class.
+        max_channels, max_samples = self._get_buffer().spec.shape
+        if msg.config.channels > max_channels or msg.config.n_samples > max_samples:
+            self._reply_error(
+                msg,
+                f"record ({msg.config.channels}, {msg.config.n_samples}) does not fit a "
+                f"buffer slot of ({max_channels}, {max_samples})")
+            return
         self._config = msg.config
         self._reply_ok(msg)
 
-    @worker_thread
-    def _on_acquire_point(self, msg: AcquirePoint) -> None:
-        scope = self._scope
-        if scope is None:
-            self._reply_error(msg, "Oscilloscope not started")
-            return
-        try:
-            for _ in range(max(int(msg.discard), 0)):
-                # The scope's buffer can still hold a record captured before the stage
-                # finished moving. Averaging that in biases the point toward where the
-                # probe used to be, which reads as a real feature in the interferogram.
-                scope.acquire_trace()
-            values: list[float] = []
-            counts: list[int] = []
-            for _ in range(max(int(msg.n_traces), 1)):
-                row = self._channel_row(scope.acquire_trace(), msg.channel)
-                positive = row[row > 0.0]
-                values.append(float(positive.mean()) if positive.size else 0.0)
-                counts.append(int(positive.size))
-        except Exception as exc:
-            log.exception("OscilloscopeWorker: point acquisition failed")
-            self._reply_error(msg, str(exc))
-            return
-        self._reply(AcquirePointReply(values=values, counts=counts, request_id=msg.id))
-
-    @worker_thread
-    def _on_acquire_trace(self, msg: AcquireTrace) -> None:
-        scope = self._scope
-        if scope is None:
-            self._reply_error(msg, "Oscilloscope not started")
-            return
-        try:
-            row = self._channel_row(scope.acquire_trace(), msg.channel)
-            positive = row[row > 0.0]
-        except Exception as exc:
-            log.exception("OscilloscopeWorker: trace acquisition failed")
-            self._reply_error(msg, str(exc))
-            return
-        rate = self._config.sample_rate_hz
-        self._reply(AcquireTraceReply(
-            samples=[float(v) for v in row],
-            dt_s=(1.0 / rate) if rate > 0 else 0.0,
-            v_mean_pos=float(positive.mean()) if positive.size else 0.0,
-            n_positive=int(positive.size),
-            request_id=msg.id,
-        ))
-
-    def _channel_row(self, trace, channel: int) -> "np.ndarray":
-        """Samples for a 1-based channel number, as the SCPI interface numbers them."""
-        index = max(int(channel), 1) - 1
-        samples = np.asarray(trace.samples)
-        if index >= samples.shape[0]:
-            raise IndexError(
-                f"channel {channel} is not in this trace: the scope is configured for "
-                f"{samples.shape[0]} channel(s)")
-        return samples[index]
-
     def _acquire_producer(self, stop: threading.Event):
-        """Generator: yields (slot, samples, timestamp_ns) until stopped."""
+        """Generator: yields (slot, trace) until stopped."""
         while not stop.is_set():
             scope = self._scope
             if scope is None:
@@ -173,14 +120,18 @@ class OscilloscopeWorker(DeviceWorkerMixin, WriterWorker[ScopeBuffer]):
                 time.sleep(0.001)
                 continue
             try:
-                trace = scope.acquire_trace()
-                yield (slot, trace.samples, trace.timestamp_ns)
+                yield (slot, scope.acquire_trace())
             except Exception:
                 log.exception("OscilloscopeWorker: acquisition error — stopping loop")
                 return
 
     def _on_acquired(self, item: tuple) -> None:
-        slot, samples, timestamp_ns = item
-        self._get_buffer().write_trace(slot, samples)
+        slot, trace = item
+        self._get_buffer().write_trace(slot, trace.samples)
         self._item_id += 1
-        self._notify_written(slot, self._item_id, timestamp_ns)
+        self._notify_written(slot, self._item_id, trace.timestamp_ns)
+        if trace.dt_s != self._dt_s:
+            # One message per turn of the horizontal knob. The frame itself carries no
+            # metadata, so this is the only way the time axis learns its scale.
+            self._dt_s = trace.dt_s
+            self._notify(ScopeTimebase(dt_s=trace.dt_s))

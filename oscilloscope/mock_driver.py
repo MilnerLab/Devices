@@ -35,6 +35,7 @@ class MockScope:
     def acquire_trace(self) -> ScopeTrace:
         p = self._params
         n = self._config.n_samples
+        started_ns = time.time_ns()
         x = np.linspace(0.0, 1.0, n)
 
         width = max(p.width_frac, 1e-3)
@@ -50,4 +51,10 @@ class MockScope:
 
         rows = [ch1, ch2][: self._config.channels]
         samples = np.vstack(rows).astype(np.float64)
-        return ScopeTrace(samples=samples, timestamp_ns=time.time_ns())
+        # No instrument to ask, so the configured rate is the honest answer here.
+        rate = self._config.sample_rate_hz
+        return ScopeTrace(
+            samples=samples,
+            timestamp_ns=started_ns,
+            dt_s=(1.0 / rate) if rate > 0 else 0.0,
+        )
