@@ -2,8 +2,9 @@
 Real Tektronix TBS2012C driver via PyVISA/SCPI (M1.D.1b).
 
 Not exercised in CI (needs the instrument + a VISA backend, e.g. pyvisa-py or NI-VISA).
-Selected when ``ScopeConfig.mock=False``. Mirrors :class:`oscilloscope.mock_driver.MockScope`
-so the worker is driver-agnostic.
+Selected when the worker is started in ``ConnectionMode.DEVICE`` and the instrument
+answers. Mirrors :class:`oscilloscope.mock_driver.MockScope` so the worker is
+driver-agnostic.
 
 SCPI flow per channel: set DATa source/encoding/range, read the WFMOutpre scaling
 preamble, ``CURVe?`` for the raw samples, then apply ``volts = (raw - YOFf)*YMUlt + YZEro``.
@@ -15,7 +16,7 @@ import time
 import numpy as np
 
 from oscilloscope.config import ScopeConfig
-from oscilloscope.mock_driver import ScopeTrace
+from oscilloscope.models import ScopeTrace
 
 
 class TbsScope:

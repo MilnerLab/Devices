@@ -134,6 +134,23 @@ class XPSController(Controller):
         else:
             self.xps.initialize_group(group)
 
+    def spin(self, address: XPSAddress, velocity_deg_s: float) -> None:
+        """Free-running rotation. Not available on a standard SingleAxis group.
+
+        The refusal lives here, at the controller, rather than at the device, so that a
+        mocked controller can implement the same primitive. On a SingleAxis group the
+        ±168° limit switches make endless rotation impossible; a SpindleAxis group
+        drives it through GroupSpinParametersSet, whose command name varies by firmware
+        generation, so verify against the controller's manual before wiring it.
+        """
+        raise NotImplementedError(
+            "Continuous spin requires a SpindleAxis group; wire this to your "
+            "controller's GroupSpinParametersSet command. See the XPS manual.")
+
+    def stop_spin(self, address: XPSAddress) -> None:
+        """Ramp a free-running axis to a stop. See :meth:`spin`."""
+        self.stop(address)
+
     # -- convenience ------------------------------------------------------ #
     def status(self) -> str:
         """Human-readable status of the whole controller (groups + stages)."""

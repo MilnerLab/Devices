@@ -1,9 +1,10 @@
-"""Servo-shutter worker — block/unblock a centrifuge arm (manual stub for now)."""
+"""Servo-shutter worker — block/unblock a centrifuge arm (manual actuation for now)."""
 from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
 
+from base_core.ipc.device_worker import DeviceWorkerMixin
 from base_core.ipc.threaded_worker import ThreadedWorker, worker_thread
 
 from control_readout.servo_shutter.config import ServoShutterConfig
@@ -18,13 +19,7 @@ log = logging.getLogger(__name__)
 WORKER_ID = "servo_shutter"
 
 
-def _make_driver(config: ServoShutterConfig):
-    # Only the manual stub exists today; real Arduino/ESP32 actuation is a TODO (D16).
-    from control_readout.servo_shutter.stub_driver import ManualShutterStub
-    return ManualShutterStub(config)
-
-
-class ServoShutterWorker(ThreadedWorker):
+class ServoShutterWorker(DeviceWorkerMixin, ThreadedWorker):
     def __init__(
         self,
         bus: "EventBus",
@@ -42,9 +37,25 @@ class ServoShutterWorker(ThreadedWorker):
 
     def _start(self) -> None:
         if self._driver is None:
-            self._driver = _make_driver(self._config)
-            self._driver.open()
+            self._driver = self._open_device()
         self._is_paused = False
+
+    def _connect(self):
+        # The manual driver IS the real one: a person blocks the arm, prompted by it.
+        # Nothing here can fail, so this device never demotes on its own — asking for
+        # the mock is the only way to get one, which is the honest state of D16.
+        from control_readout.servo_shutter.manual_driver import ManualShutter
+
+        driver = ManualShutter(self._config)
+        driver.open()
+        return driver
+
+    def _connect_mock(self):
+        from control_readout.servo_shutter.mock_driver import MockShutter
+
+        driver = MockShutter(self._config)
+        driver.open()
+        return driver
 
     def _pause(self) -> None:
         self._is_paused = True

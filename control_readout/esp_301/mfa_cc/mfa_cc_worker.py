@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from control_readout.esp_301.controller import ESP301Controller
+from base_core.ipc.connection_mode import ConnectionMode
+from base_core.ipc.device_worker import DeviceWorkerMixin
+
+from control_readout.base.controller_provider import ControllerProvider
 from control_readout.esp_301.mfa_cc.mfa_cc_device import MFACC
 from control_readout.esp_301.mfa_cc.messages import (
     GetCurrentPosMFACC,
@@ -23,7 +26,7 @@ WORKER_ID = "mfacc"
 AXIS = 2
 
 
-class MfaccWorker(MotorizedWorker):
+class MfaccWorker(DeviceWorkerMixin, MotorizedWorker):
     MOVE_MSG = MoveMFACCTo
     HOME_MSG = HomeMFACC
     GET_POS_MSG = GetCurrentPosMFACC
@@ -32,16 +35,26 @@ class MfaccWorker(MotorizedWorker):
         self,
         bus: "EventBus",
         connector: "SubprocessPipelineConnector",
-        controller: ESP301Controller,
+        provider: ControllerProvider,
     ) -> None:
         super().__init__(WORKER_ID, bus, connector)
-        self._controller = controller
+        self._provider = provider
         self._stage: Optional[MFACC] = None
 
     def _start(self) -> None:
         if self._stage is None:
-            self._stage = MFACC("mfacc", axis=AXIS, controller=self._controller)
-            self._stage.start()
+            self._stage = self._open_device()
+
+    def _connect(self) -> MFACC:
+        return self._attach(self._provider.acquire(ConnectionMode.DEVICE))
+
+    def _connect_mock(self) -> MFACC:
+        return self._attach(self._provider.acquire(ConnectionMode.MOCK))
+
+    def _attach(self, controller) -> MFACC:
+        stage = MFACC("mfacc", axis=AXIS, controller=controller)
+        stage.start()
+        return stage
 
     def _pause(self) -> None:
         if self._stage is not None:

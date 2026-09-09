@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from control_readout.esp_301.controller import ESP301Controller
+from base_core.ipc.connection_mode import ConnectionMode
+from base_core.ipc.device_worker import DeviceWorkerMixin
+
+from control_readout.base.controller_provider import ControllerProvider
 from control_readout.esp_301.uts150cc.uts150cc_device import UTS150CC
 from control_readout.esp_301.uts150cc.messages import (
     GetCurrentPosUTS150CC,
@@ -23,7 +26,7 @@ WORKER_ID = "uts150cc"
 AXIS = 3
 
 
-class Uts150ccWorker(MotorizedWorker):
+class Uts150ccWorker(DeviceWorkerMixin, MotorizedWorker):
     MOVE_MSG = MoveUTS150CCTo
     HOME_MSG = HomeUTS150CC
     GET_POS_MSG = GetCurrentPosUTS150CC
@@ -32,16 +35,26 @@ class Uts150ccWorker(MotorizedWorker):
         self,
         bus: "EventBus",
         connector: "SubprocessPipelineConnector",
-        controller: ESP301Controller,
+        provider: ControllerProvider,
     ) -> None:
         super().__init__(WORKER_ID, bus, connector)
-        self._controller = controller
+        self._provider = provider
         self._stage: Optional[UTS150CC] = None
 
     def _start(self) -> None:
         if self._stage is None:
-            self._stage = UTS150CC("uts150cc", axis=AXIS, controller=self._controller)
-            self._stage.start()
+            self._stage = self._open_device()
+
+    def _connect(self) -> UTS150CC:
+        return self._attach(self._provider.acquire(ConnectionMode.DEVICE))
+
+    def _connect_mock(self) -> UTS150CC:
+        return self._attach(self._provider.acquire(ConnectionMode.MOCK))
+
+    def _attach(self, controller) -> UTS150CC:
+        stage = UTS150CC("uts150cc", axis=AXIS, controller=controller)
+        stage.start()
+        return stage
 
     def _pause(self) -> None:
         if self._stage is not None:

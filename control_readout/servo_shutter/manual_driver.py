@@ -1,8 +1,10 @@
 """
-Stub shutter driver — tracks per-arm blocked state and prompts for MANUAL blocking.
+Manual shutter driver — tracks per-arm blocked state and prompts a human to do it.
 
-Per D16 we build the high-level flow now; real servo actuation (Arduino/ESP32) is a
-**TODO** once comms details exist. Swap this for a real driver with the same interface.
+This is the **real** driver, not a mock, and the distinction matters. The blocking does
+happen in the lab; a person performs it, prompted by the warning below. Real servo
+actuation over Arduino/ESP32 is a TODO (D16) and will replace the prompt with a wire,
+at which point this file becomes the mock it currently only resembles.
 """
 from __future__ import annotations
 
@@ -13,7 +15,7 @@ from control_readout.servo_shutter.config import ServoShutterConfig
 log = logging.getLogger(__name__)
 
 
-class ManualShutterStub:
+class ManualShutter:
     def __init__(self, config: ServoShutterConfig) -> None:
         self._config = config
         self._blocked: dict[int, bool] = {arm: False for arm in config.arms}

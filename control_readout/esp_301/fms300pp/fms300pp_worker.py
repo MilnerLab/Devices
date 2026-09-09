@@ -3,7 +3,10 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING, Optional
 
-from control_readout.esp_301.controller import ESP301Controller
+from base_core.ipc.connection_mode import ConnectionMode
+from base_core.ipc.device_worker import DeviceWorkerMixin
+
+from control_readout.base.controller_provider import ControllerProvider
 from control_readout.esp_301.fms300pp.fms300pp_device import FMS300PP
 from control_readout.esp_301.fms300pp.messages import (
     FMS300PPPosReply,
@@ -23,7 +26,7 @@ WORKER_ID = "fms300pp"
 AXIS = 1
 
 
-class Fms300ppWorker(MotorizedWorker):
+class Fms300ppWorker(DeviceWorkerMixin, MotorizedWorker):
     MOVE_MSG = MoveFMS300PPTo
     HOME_MSG = HomeFMS300PP
     GET_POS_MSG = GetCurrentPosFMS300PP
@@ -32,16 +35,26 @@ class Fms300ppWorker(MotorizedWorker):
         self,
         bus: "EventBus",
         connector: "SubprocessPipelineConnector",
-        controller: ESP301Controller,
+        provider: ControllerProvider,
     ) -> None:
         super().__init__(WORKER_ID, bus, connector)
-        self._controller = controller
+        self._provider = provider
         self._stage: Optional[FMS300PP] = None
 
     def _start(self) -> None:
         if self._stage is None:
-            self._stage = FMS300PP("fms300pp", axis=AXIS, controller=self._controller)
-            self._stage.start()
+            self._stage = self._open_device()
+
+    def _connect(self) -> FMS300PP:
+        return self._attach(self._provider.acquire(ConnectionMode.DEVICE))
+
+    def _connect_mock(self) -> FMS300PP:
+        return self._attach(self._provider.acquire(ConnectionMode.MOCK))
+
+    def _attach(self, controller) -> FMS300PP:
+        stage = FMS300PP("fms300pp", axis=AXIS, controller=controller)
+        stage.start()
+        return stage
 
     def _pause(self) -> None:
         if self._stage is not None:

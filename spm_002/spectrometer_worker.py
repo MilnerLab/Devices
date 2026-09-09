@@ -3,24 +3,25 @@ from __future__ import annotations
 import logging
 import threading
 import time
+from dataclasses import replace
 
 import numpy as np
 
 from base_core.framework.events.event_bus import EventBus
 from base_core.framework.shm.writer_worker import WriterWorker
+from base_core.ipc.device_worker import DeviceWorkerMixin
 from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 from base_core.ipc.threaded_worker import worker_thread
 from spm_002.buffer import SpectrumBuffer
 from spm_002.config import SpectrometerConfig
 from spm_002.messages import SetSpectrometerConfig
-from spm_002.spectrometer import Spectrometer
 
 log = logging.getLogger(__name__)
 
 WORKER_ID = "spectrometer"
 
 
-class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
+class SpectrometerWorker(DeviceWorkerMixin, WriterWorker[SpectrumBuffer]):
     """
     Runs the acquisition loop inside the spectrometer subprocess.
 
@@ -39,7 +40,7 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
     ) -> None:
         super().__init__(WORKER_ID, bus, connector, get_buffer)
         self._config = None
-        self._spectrometer: Spectrometer | None = None
+        self._spectrometer = None
         self._item_id = 0
 
     def _setup(self) -> None:
@@ -50,11 +51,48 @@ class SpectrometerWorker(WriterWorker[SpectrumBuffer]):
 
     def _start(self) -> None:
         if self._spectrometer is None:
-            self._spectrometer = Spectrometer(self._config)
-            self._spectrometer.open()
-            self._spectrometer.apply_config()
+            self._spectrometer = self._open_device()
         self._start_producing(self._acquire_producer, on_item=self._on_acquired)
         log.debug("SpectrometerWorker: started acquisition")
+
+    def _connect(self):
+        # Imported here, not at module scope: spm_002.dll loads PhotonSpectr.dll at
+        # import time, so a top-level import makes the whole module unimportable on a
+        # machine without the DLL — and an unimportable module cannot fall back.
+        from spm_002.spectrometer import Spectrometer
+
+        device = Spectrometer(self._config)
+        device.open()
+        device.apply_config()
+        return device
+
+    def _connect_mock(self):
+        from spm_002.mock_params import MockSpectrometerParams
+        from spm_002.mock_spectrometer import MockSpectrometer
+
+        # Size the mock from the buffer it has to write into, rather than trusting the
+        # two defaults to agree. They did not: the slot is shaped (2, 3648) for the real
+        # SPM-002, and a mock of any other length fails on the first write with a numpy
+        # broadcast error, several frames away from the mismatch that caused it.
+        params = MockSpectrometerParams()
+        pixels = self._buffer_pixel_count()
+        if pixels is not None and pixels != params.pixels:
+            span_nm = (params.pixels - 1) * params.lambda_step_nm
+            params = replace(params, pixels=pixels,
+                             lambda_step_nm=span_nm / max(pixels - 1, 1))
+            log.info("MockSpectrometer: sized to the buffer's %d pixels", pixels)
+
+        device = MockSpectrometer(self._config, params)
+        device.open()
+        device.apply_config()
+        return device
+
+    def _buffer_pixel_count(self) -> int | None:
+        """Pixels per slot, or None if the buffer has not been attached yet."""
+        try:
+            return int(self._get_buffer().spec.shape[1])
+        except Exception:
+            return None
 
     def _pause(self) -> None:
         handle = self._stop_producing()
