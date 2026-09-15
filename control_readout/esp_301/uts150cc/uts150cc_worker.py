@@ -8,6 +8,7 @@ from base_core.ipc.device_worker import DeviceWorkerMixin
 
 from control_readout.base.controller_provider import ControllerProvider
 from control_readout.esp_301.uts150cc.uts150cc_device import UTS150CC
+from control_readout.esp_301.uts150cc.spec import AXIS
 from control_readout.esp_301.uts150cc.messages import (
     GetCurrentPosUTS150CC,
     HomeUTS150CC,
@@ -22,8 +23,6 @@ if TYPE_CHECKING:
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 
 WORKER_ID = "uts150cc"
-#: 1-based ESP301 axis this stage is wired to. Adjust to match the hardware.
-AXIS = 3
 
 
 class Uts150ccWorker(DeviceWorkerMixin, MotorizedWorker):

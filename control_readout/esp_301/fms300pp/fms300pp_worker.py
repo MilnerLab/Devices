@@ -8,6 +8,7 @@ from base_core.ipc.device_worker import DeviceWorkerMixin
 
 from control_readout.base.controller_provider import ControllerProvider
 from control_readout.esp_301.fms300pp.fms300pp_device import FMS300PP
+from control_readout.esp_301.fms300pp.spec import AXIS
 from control_readout.esp_301.fms300pp.messages import (
     FMS300PPPosReply,
     FMS300PPPosUpdate,
@@ -22,8 +23,6 @@ if TYPE_CHECKING:
     from base_core.ipc.subprocess_connector import SubprocessPipelineConnector
 
 WORKER_ID = "fms300pp"
-#: 1-based ESP301 axis this stage is wired to. Adjust to match the hardware.
-AXIS = 1
 
 
 class Fms300ppWorker(DeviceWorkerMixin, MotorizedWorker):
