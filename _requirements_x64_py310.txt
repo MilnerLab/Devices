@@ -1,0 +1,4 @@
+-e .
+-e ../Base_Core
+# spinnaker_python 4.2 needs numpy>=2.0; 2.2.x is the last line that supports Python 3.10
+numpy==2.2.6

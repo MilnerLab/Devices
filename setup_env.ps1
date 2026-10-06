@@ -23,10 +23,18 @@ $venv64Path         = Join-Path $repoRoot ".venv64"
 $requirements64File = Join-Path $repoRoot "_requirements_x64.txt"
 $python64Spec       = "-3.13"      # adjust if needed
 
+# Spinnaker (PySpin) only ships a cp310 wheel, so the VMI camera gets its own 64-bit 3.10 venv
+$venv310Path         = Join-Path $repoRoot ".venv310"
+$requirements310File = Join-Path $repoRoot "_requirements_x64_py310.txt"
+$python310Spec       = "-3.10-64"
+$spinnakerWheel      = Join-Path $repoRoot "wheels/spinnaker_python-4.2.0.88-cp310-cp310-win_amd64.whl"
+
 # --- Helpers ---
 function Invoke-Native {
     param([string] $Exe, [string[]] $ArgList = @())
-    & $Exe @ArgList
+    # Send output to the console, not the pipeline -- otherwise it leaks into the
+    # return value of any function that calls this (e.g. Setup-Venv's python path)
+    & $Exe @ArgList | Out-Host
     if ($LASTEXITCODE -ne 0) { throw "Command failed ($LASTEXITCODE): $Exe $($ArgList -join ' ')" }
 }
 
@@ -123,8 +131,41 @@ $py64 = Resolve-Python -WinSpec $python64Spec
 $python64Exe = Setup-Venv -VenvPath $venv64Path -PyRunner $py64 -RequirementsFile $requirements64File
 Write-Host "64-bit python: '$python64Exe'"
 
+# --- .venv310 (64-bit Python 3.10 for the VMI camera / PySpin) ---
+Write-Host ""
+Write-Host "##############################"
+Write-Host " Setting up .venv310 environment"
+Write-Host "##############################"
+
+$python310Exe = $null
+if ($script:OnWindows) {
+    if (Get-Command py -ErrorAction SilentlyContinue) {
+        $py310 = Resolve-Python -WinSpec $python310Spec
+        $python310Exe = Setup-Venv -VenvPath $venv310Path -PyRunner $py310 -RequirementsFile $requirements310File
+        if (Test-Path $spinnakerWheel) {
+            Write-Host "=== Installing Spinnaker wheel '$spinnakerWheel' ==="
+            Invoke-Native $python310Exe @("-m", "pip", "install", $spinnakerWheel)
+        } else {
+            Write-Warning "Spinnaker wheel '$spinnakerWheel' not found -- PySpin will not be importable in .venv310."
+        }
+        $env:PYTHON310_PATH = $python310Exe
+        Write-Host "PYTHON310_PATH set to '$python310Exe'."
+    } else {
+        Write-Warning "'py' launcher not found -- skipping .venv310 (install Python 3.10 64-bit + py launcher)."
+    }
+} else {
+    Write-Host "(Linux: skipping .venv310 -- the Spinnaker wheel is Windows-only)"
+}
+
+# Setup-Venv activates each venv it touches; re-activate .venv64 so it stays the session default
+$activate64 = Get-ActivateScriptPath $venv64Path
+if (Test-Path $activate64) { . $activate64 }
+
 Write-Host ""
 Write-Host "=== Done. .venv64 '$venv64Path' is active in this session. ==="
 if ($python32Exe) {
     Write-Host ".venv32 python (SPM-002 subprocess): '$python32Exe'$(if ($env:PYTHON32_PATH) { " (`$env:PYTHON32_PATH)" })"
+}
+if ($python310Exe) {
+    Write-Host ".venv310 python (VMI camera subprocess): '$python310Exe' (`$env:PYTHON310_PATH)"
 }
