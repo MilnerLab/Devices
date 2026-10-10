@@ -40,6 +40,16 @@ class Camera(ABC):
         """Push self.config to the device and start free-running acquisition."""
         ...
 
+    @abstractmethod
+    def update_live(self, config: CameraConfig) -> None:
+        """Adopt config and push only the settings safe to change mid-stream (exposure, gain).
+
+        Must not start or stop acquisition: CameraWorker calls this while its acquisition
+        loop is blocked in acquire_frame(). Settings that fix the frame shape (ROI, pixel
+        format) are deliberately not touched -- they only take effect via apply_config().
+        """
+        ...
+
     def set_config(self, config: CameraConfig) -> None:
         """Replace the current configuration object. Does not touch the device."""
         self.config = config

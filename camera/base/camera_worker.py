@@ -30,7 +30,8 @@ class CameraWorker(WriterWorker[CameraBuffer]):
     On PauseWorker: drains the stream, closes nothing (device stays open).
     On ResumeWorker: restarts the acquisition stream (device stays open).
     On StopWorker: closes the hardware.
-    On SetCameraConfig: applies new settings (live while running or buffered for next start).
+    On SetCameraConfig: applies exposure/gain live while the device is open (acquisition
+    keeps running); the whole config is stored and applied in full on the next start.
     """
 
     def __init__(
@@ -87,21 +88,15 @@ class CameraWorker(WriterWorker[CameraBuffer]):
     def _on_set_config(self, msg: SetCameraConfig) -> None:
         self._config = msg.config
         if self._camera is not None and self._camera.is_open:
-            was_producing = self._prod_handle is not None
-            if was_producing:
-                handle = self._stop_producing()
-                if handle is not None:
-                    handle.wait(timeout=5.0)
+            # Live, without stopping the acquisition loop: update_live only writes nodes
+            # that are safe mid-stream. A full configure() would re-run BeginAcquisition on
+            # a stream that is already running.
             try:
-                self._camera.configure(self._config)
+                self._camera.update_live(self._config)
             except Exception as exc:
-                log.exception("CameraWorker: configure failed")
+                log.exception("CameraWorker: live config update failed")
                 self._reply_error(msg, str(exc))
-                if was_producing:
-                    self._start_producing(self._acquire_producer, on_item=self._on_acquired)
                 return
-            if was_producing:
-                self._start_producing(self._acquire_producer, on_item=self._on_acquired)
         self._reply_ok(msg)
 
     def _acquire_producer(self, stop: threading.Event):

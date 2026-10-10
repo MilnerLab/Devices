@@ -81,6 +81,28 @@ class VmiCamera(Camera):
         if cam.Height.GetAccessMode() == PySpin.RW:
             cam.Height.SetValue(max(cam.Height.GetMin(), min(cam.Height.GetMax(), cfg.height)))
 
+        self._set_exposure(cfg)
+        self._set_gain(cfg)
+
+        if cfg.pixel_format and cam.PixelFormat.GetAccessMode() == PySpin.RW:
+            pixel_format_value = getattr(PySpin, f"PixelFormat_{cfg.pixel_format}", None)
+            if pixel_format_value is None:
+                raise CameraError(f"Unknown pixel format: {cfg.pixel_format!r}")
+            cam.PixelFormat.SetValue(pixel_format_value)
+
+        cam.BeginAcquisition()
+
+    def update_live(self, config) -> None:
+        if not self._is_open:
+            raise CameraError("update_live() called before open().")
+        self.config = config
+        # ExposureTime and Gain are writable while streaming on the Blackfly S; ROI and
+        # pixel format are not, so they are left to apply_config() on the next start.
+        self._set_exposure(config)
+        self._set_gain(config)
+
+    def _set_exposure(self, cfg) -> None:
+        cam = self._cam
         if cam.ExposureAuto.GetAccessMode() == PySpin.RW:
             cam.ExposureAuto.SetValue(PySpin.ExposureAuto_Off)
             time.sleep(0.05)
@@ -93,23 +115,19 @@ class VmiCamera(Camera):
         else:
             raise CameraError("ExposureTime node not writable.")
 
+    def _set_gain(self, cfg) -> None:
+        cam = self._cam
         if cam.Gain.GetAccessMode() == PySpin.RW:
             cam.Gain.SetValue(cfg.gain)
-
-        if cfg.pixel_format and cam.PixelFormat.GetAccessMode() == PySpin.RW:
-            pixel_format_value = getattr(PySpin, f"PixelFormat_{cfg.pixel_format}", None)
-            if pixel_format_value is None:
-                raise CameraError(f"Unknown pixel format: {cfg.pixel_format!r}")
-            cam.PixelFormat.SetValue(pixel_format_value)
-
-        cam.BeginAcquisition()
 
     def acquire_frame(self) -> FrameData:
         if not self._is_open:
             raise CameraError("acquire_frame() called before open().")
 
+        # The timeout must outlast one exposure, or a long exposure set live kills the loop.
+        timeout_ms = int(max(self.config.timeout_ms, self.config.exposure_time.value(Prefix.MILLI) + 500))
         for _ in range(_INCOMPLETE_RETRY_LIMIT):
-            img = self._cam.GetNextImage(self.config.timeout_ms)
+            img = self._cam.GetNextImage(timeout_ms)
             if img.IsIncomplete():
                 img.Release()
                 continue
