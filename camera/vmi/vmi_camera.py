@@ -12,6 +12,17 @@ from camera.base.models import FrameData
 _INCOMPLETE_RETRY_LIMIT = 5
 
 
+def _fit(node, value: int) -> int:
+    """Clamp an integer node's value to its range and round down to its increment.
+
+    The ROI nodes only take multiples of their increment (e.g. 4 or 8 px for Width) and
+    raise on anything else, so the value from the config is snapped rather than sent.
+    """
+    lo, hi, inc = node.GetMin(), node.GetMax(), max(1, node.GetInc())
+    value = max(lo, min(hi, int(value)))
+    return value - (value - lo) % inc
+
+
 class VmiCamera(Camera):
     """
     PySpin (FLIR Spinnaker) driver for the Blackfly S VMI camera.
@@ -72,14 +83,21 @@ class VmiCamera(Camera):
             if PySpin.IsReadable(cont):
                 node_am.SetIntValue(cont.GetValue())
 
+        # Offsets to 0, then size, then offsets: each node's max depends on the others'
+        # current values, so in any other order a requested offset is clamped against the
+        # previous ROI's width (or a width against the previous offset).
         if cam.OffsetX.GetAccessMode() == PySpin.RW:
-            cam.OffsetX.SetValue(max(cam.OffsetX.GetMin(), min(cam.OffsetX.GetMax(), cfg.offset_x)))
+            cam.OffsetX.SetValue(cam.OffsetX.GetMin())
         if cam.OffsetY.GetAccessMode() == PySpin.RW:
-            cam.OffsetY.SetValue(max(cam.OffsetY.GetMin(), min(cam.OffsetY.GetMax(), cfg.offset_y)))
+            cam.OffsetY.SetValue(cam.OffsetY.GetMin())
         if cam.Width.GetAccessMode() == PySpin.RW:
-            cam.Width.SetValue(max(cam.Width.GetMin(), min(cam.Width.GetMax(), cfg.width)))
+            cam.Width.SetValue(_fit(cam.Width, cfg.width))
         if cam.Height.GetAccessMode() == PySpin.RW:
-            cam.Height.SetValue(max(cam.Height.GetMin(), min(cam.Height.GetMax(), cfg.height)))
+            cam.Height.SetValue(_fit(cam.Height, cfg.height))
+        if cam.OffsetX.GetAccessMode() == PySpin.RW:
+            cam.OffsetX.SetValue(_fit(cam.OffsetX, cfg.offset_x))
+        if cam.OffsetY.GetAccessMode() == PySpin.RW:
+            cam.OffsetY.SetValue(_fit(cam.OffsetY, cfg.offset_y))
 
         self._set_exposure(cfg)
         self._set_gain(cfg)
