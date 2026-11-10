@@ -61,8 +61,13 @@ class Camera(ABC):
         self.apply_config()
 
     @abstractmethod
-    def acquire_frame(self) -> FrameData:
-        """Block for one frame and return it."""
+    def acquire_frame(self) -> FrameData | None:
+        """Block for one frame and return it.
+
+        None means no frame arrived within the timeout and that is expected -- e.g. a
+        triggered camera waiting for its next trigger. The caller just calls again.
+        Raise for real faults.
+        """
         ...
 
     @abstractmethod

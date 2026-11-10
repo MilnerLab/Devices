@@ -86,6 +86,11 @@ class CameraWorker(WriterWorker[CameraBuffer]):
 
     @worker_thread
     def _on_set_config(self, msg: SetCameraConfig) -> None:
+        self._apply_set_config(msg)
+
+    def _apply_set_config(self, msg: SetCameraConfig) -> None:
+        """The body of _on_set_config, already on the worker thread. Vendor workers
+        override this (not _on_set_config) to add steps without a second dispatch."""
         self._config = msg.config
         if self._camera is not None and self._camera.is_open:
             # Live, without stopping the acquisition loop: update_live only writes nodes
@@ -110,11 +115,19 @@ class CameraWorker(WriterWorker[CameraBuffer]):
                 time.sleep(0.001)
                 continue
             try:
+                # Wait on the one slot until a frame comes: None is a timeout with nothing
+                # wrong (a triggered camera between triggers), not a reason to stop.
                 data = camera.acquire_frame()
-                yield (slot, data.frame, data.timestamp_ns)
+                while data is None and not stop.is_set():
+                    data = camera.acquire_frame()
             except Exception:
                 log.exception("CameraWorker: acquisition error — stopping loop")
                 return
+            if data is None:
+                # Stopped while waiting. The slot was never written, so it goes back.
+                self._unget_slot(slot)
+                return
+            yield (slot, data.frame, data.timestamp_ns)
 
     def _on_acquired(self, item: tuple) -> None:
         slot, frame, timestamp_ns = item

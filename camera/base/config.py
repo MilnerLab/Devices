@@ -41,3 +41,5 @@ class CameraConfig(PrimitiveSerde):
     height: int = 1024
     pixel_format: str = "Mono8"
     timeout_ms: int = 1000
+    #: Hardware-triggered acquisition instead of free-running. How the trigger is wired
+    trigger_mode: bool = False

@@ -11,6 +11,15 @@ from camera.base.models import FrameData
 
 _INCOMPLETE_RETRY_LIMIT = 5
 
+# Hardware trigger wiring for the VMI setup: a frame starts on a rising edge on Line0.
+_TRIGGER_SELECTOR = "FrameStart"
+_TRIGGER_SOURCE = "Line0"
+_TRIGGER_ACTIVATION = "RisingEdge"
+
+# PySpin's errorcode for GetNextImage running out of time. getattr because the constant
+# is not exported by every PySpin build.
+_ERR_TIMEOUT = getattr(PySpin, "SPINNAKER_ERR_TIMEOUT", -1011)
+
 
 def _fit(node, value: int) -> int:
     """Clamp an integer node's value to its range and round down to its increment.
@@ -21,6 +30,17 @@ def _fit(node, value: int) -> int:
     lo, hi, inc = node.GetMin(), node.GetMax(), max(1, node.GetInc())
     value = max(lo, min(hi, int(value)))
     return value - (value - lo) % inc
+
+
+def _set_enum(nodemap, name: str, entry: str) -> None:
+    """Set an enumeration node by entry name, or say which node refused."""
+    node = PySpin.CEnumerationPtr(nodemap.GetNode(name))
+    if not (PySpin.IsReadable(node) and PySpin.IsWritable(node)):
+        raise CameraError(f"{name} node is not writable.")
+    value = node.GetEntryByName(entry)
+    if not PySpin.IsReadable(value):
+        raise CameraError(f"{name} has no entry {entry!r}.")
+    node.SetIntValue(value.GetValue())
 
 
 class VmiCamera(Camera):
@@ -108,7 +128,38 @@ class VmiCamera(Camera):
                 raise CameraError(f"Unknown pixel format: {cfg.pixel_format!r}")
             cam.PixelFormat.SetValue(pixel_format_value)
 
+        self._set_trigger(cfg.trigger_mode)
+
         cam.BeginAcquisition()
+
+    def set_trigger_mode(self, enabled: bool) -> None:
+        """Switch between triggered and free-running on an open, streaming camera.
+
+        Ends and restarts the stream around the change, since the trigger nodes are not
+        writable mid-acquisition. The caller must not be inside acquire_frame() -- that
+        is what VmiCameraWorker pauses its acquisition loop for.
+        """
+        if not self._is_open:
+            raise CameraError("set_trigger_mode() called before open().")
+        try:
+            self._cam.EndAcquisition()
+        except PySpin.SpinnakerException:
+            pass  # not streaming yet
+        self._set_trigger(enabled)
+        self._cam.BeginAcquisition()
+        self.config.trigger_mode = enabled
+
+    def _set_trigger(self, enabled: bool) -> None:
+        # Mode goes Off first and On last: TriggerSelector and TriggerSource can only be
+        # written while TriggerMode is Off.
+        nodemap = self._cam.GetNodeMap()
+        _set_enum(nodemap, "TriggerMode", "Off")
+        if not enabled:
+            return
+        _set_enum(nodemap, "TriggerSelector", _TRIGGER_SELECTOR)
+        _set_enum(nodemap, "TriggerSource", _TRIGGER_SOURCE)
+        _set_enum(nodemap, "TriggerActivation", _TRIGGER_ACTIVATION)
+        _set_enum(nodemap, "TriggerMode", "On")
 
     def update_live(self, config) -> None:
         if not self._is_open:
@@ -138,14 +189,22 @@ class VmiCamera(Camera):
         if cam.Gain.GetAccessMode() == PySpin.RW:
             cam.Gain.SetValue(cfg.gain)
 
-    def acquire_frame(self) -> FrameData:
+    def acquire_frame(self) -> FrameData | None:
         if not self._is_open:
             raise CameraError("acquire_frame() called before open().")
 
         # The timeout must outlast one exposure, or a long exposure set live kills the loop.
         timeout_ms = int(max(self.config.timeout_ms, self.config.exposure_time.value(Prefix.MILLI) + 500))
         for _ in range(_INCOMPLETE_RETRY_LIMIT):
-            img = self._cam.GetNextImage(timeout_ms)
+            try:
+                img = self._cam.GetNextImage(timeout_ms)
+            except PySpin.SpinnakerException as exc:
+                # Triggered, a timeout only means no trigger came; the caller asks again,
+                # and a frame that lands just after is kept by the stream for that call.
+                # Free-running, a timeout is a real fault and still raises.
+                if self.config.trigger_mode and exc.errorcode == _ERR_TIMEOUT:
+                    return None
+                raise
             if img.IsIncomplete():
                 img.Release()
                 continue
